@@ -26,7 +26,8 @@ class BERT(nn.Module):
         
         self.freeze_bert()
 
-    def forward(self, input, attention_mask):
+    def forward(self, x):
+        input, attention_mask = x
         output = self.bert(input, attention_mask=attention_mask)
         # we only take the hidden state of the CLS token.
         output = self.mlp(output.last_hidden_state[:, 0, :])
