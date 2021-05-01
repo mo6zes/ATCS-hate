@@ -2,6 +2,7 @@ import torch
 import json
 import csv
 import os
+from string import punctuation
 from torch.utils.data import Dataset, DataLoader
 
 class DataTwitterDavidson(Dataset):
