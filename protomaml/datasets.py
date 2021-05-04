@@ -1,8 +1,10 @@
-import torch
+
 import json
 import csv
 import os
 from string import punctuation
+
+import torch
 from torch.utils.data import Dataset, DataLoader
 
 class DataTwitterDavidson(Dataset):
@@ -17,7 +19,7 @@ class DataTwitterDavidson(Dataset):
             for row in reader:
                 self.tweets.append(row['tweet'])
                 self.labels.append(torch.tensor(int(row['class']), dtype=torch.long))
-        
+
         assert len(self.tweets) == len(self.labels)
         self.n_classes = torch.numel(torch.unique(torch.tensor(self.labels)))
         self.task_name = csv_file_dir.split("/")[-1]
@@ -69,7 +71,7 @@ class DeGilbertStormFront(Dataset):
             for row in reader:
                 self.tweets.append(row['text'])
                 self.labels.append(torch.tensor(int(self.label_dict[row['label']]), dtype=torch.long))
-        
+
         assert len(self.tweets) == len(self.labels)
         self.n_classes = torch.numel(torch.unique(torch.tensor(self.labels)))
         self.task_name = csv_file_dir.split("/")[-1]
@@ -80,6 +82,7 @@ class DeGilbertStormFront(Dataset):
     def __getitem__(self, idx):
         return self.tweets[idx], self.labels[idx]
 
+    @staticmethod
     def create_data_csv_file(csv_annotations_dir='../data/deGilbert/annotations_metadata.csv'):
 
         with open(csv_annotations_dir, mode='r') as csvfile:
@@ -89,7 +92,7 @@ class DeGilbertStormFront(Dataset):
             for row in reader:
                 label = row['label']
                 file_id = row['file_id']
-                
+
                 with open('../data/deGilbert/all_files/' + file_id + '.txt', mode='r', encoding="utf8") as txt_file:
                     text = txt_file.read()
 
@@ -108,23 +111,24 @@ class QuianData(Dataset):
     """
     Quian Dataset which is the same for Gab and Reddit which can be indicated with flag
     """
-    def __init__(self, csv_file_dir:str, raw_csv_file_dir:str, save_new_csv_dir:str):
+    def __init__(self, csv_file_dir: str, raw_csv_file_dir: str,
+                 save_new_csv_dir: str):
         self.tweets = []
         self.labels = []
 
         self.label_dict = {'noHate': 0, 'hate': 1}
 
-        self.data_flag
+        self.data_flag  # TODO
 
-        self.raw_csv = raw_csv_file_dir 
+        self.raw_csv = raw_csv_file_dir
         self.save_dir = save_new_csv_dir
-        
+
         with open(csv_file_dir, mode='r', encoding="utf8") as csvfile:
             reader = csv.DictReader(csvfile)
             for row in reader:
                 self.tweets.append(row['text'])
                 self.labels.append(torch.tensor(int(self.label_dict[row['label']]), dtype=torch.long))
-        
+
         assert len(self.tweets) == len(self.labels)
         self.n_classes = torch.numel(torch.unique(torch.tensor(self.labels)))
         self.task_name = csv_file_dir.split("/")[-1]
@@ -142,22 +146,22 @@ class QuianData(Dataset):
             data = []
 
             for row in reader:
-                
+
                 if row['hate_speech_idx'] == 'n/a':
                     continue
 
-                text = row['text'].split('\n')[:-1] # don't need last split ob break that yields empty string
+                text = row['text'].split('\n')[:-1]  # don't need last split ob break that yields empty string
 
                 hate_idx = row['hate_speech_idx'].replace('[', '').replace(']', '').replace(',', '')
-                hate_idx = list(hate_idx.split(" ")) 
+                hate_idx = list(hate_idx.split(" "))
                 # turn new_k into ints
                 hate_idx = [int(i) - 1 for i in hate_idx]
 
                 for idx, txt in enumerate(text):
-                    
-                    txt = txt[2:].lstrip(punctuation).lstrip() # remove numbering and leading white space/tab/punctuation
-                    
-                    if txt == '': # skip empty text
+
+                    txt = txt[2:].lstrip(punctuation).lstrip()  # remove numbering and leading white space/tab/punctuation
+
+                    if txt == '':  # skip empty text
                         continue
                     # if idx in hate_idx then this part is hate speech
                     if idx in hate_idx:
@@ -165,13 +169,12 @@ class QuianData(Dataset):
                     # otherwise no hate label
                     else:
                         data.append(['noHate', txt])
-                
-        
+
         # write to new csv file
         new_header = ['label', 'text']
         with open(self.save_dir, 'a', newline='', encoding="utf8") as new_file:
             wr = csv.writer(new_file)
-            if(os.stat(new_file_name).st_size == 0):
+            if os.stat(new_file_name).st_size == 0:  # TODO; new_file_name does not exist
                 wr.writerow(new_header)
             wr.writerows(data)
 
@@ -179,4 +182,3 @@ class QuianData(Dataset):
 # if __name__ == "__main__":
 #     data_dir = './data/gabQuian.csv'
 #     dataset = DataGabQuian(data_dir)
-
