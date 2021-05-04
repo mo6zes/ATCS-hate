@@ -11,24 +11,24 @@ class DataTwitterDavidson(Dataset):
     """
     Dataset class for Twitter data by Davidson
     """
-    def __init__(self, csv_file_dir:str):
-        self.tweets = []
+    def __init__(self, csv_file_dir: str="./raw_datasets/davidsonTwitterData.csv"):
+        self.text = []
         self.labels = []
-        with open(csv_file_dir, mode='r') as csvfile:
+        with open(os.path.join(os.path.dirname(__file__), csv_file_dir), mode='r') as csvfile:
             reader = csv.DictReader(csvfile)
             for row in reader:
-                self.tweets.append(row['tweet'])
+                self.text.append(row['tweet'])
                 self.labels.append(torch.tensor(int(row['class']), dtype=torch.long))
 
-        assert len(self.tweets) == len(self.labels)
+        assert len(self.text) == len(self.labels)
         self.n_classes = torch.numel(torch.unique(torch.tensor(self.labels)))
         self.task_name = csv_file_dir.split("/")[-1]
 
     def __len__(self):
-        return len(self.tweets)
+        return len(self.text)
 
     def __getitem__(self, idx):
-        return self.tweets[idx], self.labels[idx]
+        return self.text[idx], self.labels[idx]
 
 
 class DataFoxNews(Dataset):
