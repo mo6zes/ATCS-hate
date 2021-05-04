@@ -8,16 +8,18 @@ from models.model_utils import create_tokenizer
 import time
 
 class Task():
-    # This task class hold two dataloader and some info about the task
-    def __init__(self, task_name: str, support_loader: DataLoader, query_loader: DataLoader, task_id: int, n_classes: int):
+    """ This task class hold two dataloader and some info about the task"""
+    def __init__(self, task_name: str, support_loader: DataLoader,
+                 query_loader: DataLoader, task_id: int, n_classes: int):
         self.task_name = task_name
         self.support_loader = support_loader
         self.query_loader = query_loader
         self.task_id = task_id
         self.n_classes = n_classes
-        
+
+
 class MetaDataloader(Dataset):
-    # The metaloader is an iterator which randomly returns Tasks
+    """ The metaloader is an iterator which randomly returns Tasks"""
     def __init__(self, tasks: list):
         self.tasks = tasks
 
@@ -26,12 +28,14 @@ class MetaDataloader(Dataset):
 
     def __getitem__(self, idx):
         return self.tasks[idx]
-    
+
 def meta_collate_fn(batch):
     """Return the input without modification."""
     return batch
 
-def create_metaloader(tasks, batch_size=1, shuffle=False, num_workers=0, collate_fn=meta_collate_fn, pin_memory=False):
+
+def create_metaloader(tasks, batch_size=1, shuffle=False, num_workers=0,
+                      collate_fn=meta_collate_fn, pin_memory=False):
     dataset = MetaDataloader(tasks)
     dataloader = DataLoader(dataset, batch_size=batch_size,
                             shuffle=shuffle, num_workers=num_workers,
@@ -46,11 +50,20 @@ def prepare_batch(batch, tokenizer=create_tokenizer()):
     texts = tokenizer(texts, padding=True, truncation=True, return_tensors="pt")
     return (texts['input_ids'], texts['attention_mask']), labels
 
-def create_dataloader(dataset, batch_size=1, shuffle=False, num_workers=0, collate_fn=prepare_batch, pin_memory=False):
-    """Create a dataloader given a dataset. Small wrapper"""
-    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, collate_fn=collate_fn, pin_memory=pin_memory)
 
-def generate_tasks_from_dataset(dataset, num_tasks=None, support_examples=100, query_examples=100, **kwargs):
+def create_dataloader(dataset, batch_size=1, shuffle=False, num_workers=0,
+                      collate_fn=prepare_batch, pin_memory=False):
+    """Create a dataloader given a dataset. Small wrapper"""
+    return DataLoader(dataset,
+                      batch_size=batch_size,
+                      shuffle=shuffle,
+                      num_workers=num_workers,
+                      collate_fn=collate_fn,
+                      pin_memory=pin_memory)
+
+
+def generate_tasks_from_dataset(dataset, num_tasks=None, support_examples=100,
+                                query_examples=100, **kwargs):
     """Slice in a dataset to return a list of Tasks."""
     interval = len(dataset) // (support_examples*kwargs['batch_size'] + query_examples*kwargs['batch_size'])
     if num_tasks and interval > num_tasks:
