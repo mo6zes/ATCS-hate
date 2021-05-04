@@ -97,9 +97,9 @@ class ProtoMAML(pl.LightningModule):
                     # save the gradients in the model
                     for param, grad, meta_grad in zip(filter(lambda p: p.requires_grad, self.model.parameters()), grads, meta_grads):
                         if param.grad is not None:
-                            param.grad += grad + meta_grad
+                            param.grad += grad.detach() + meta_grad.detach()
                         else:
-                            param.grad = grad + meta_grad
+                            param.grad = grad.detach() + meta_grad.detach()
         
         # update the original model parameters and reset the gradients
         opt.step()

@@ -100,7 +100,7 @@ if __name__ == '__main__':
     parser.add_argument('--num_workers', default=0, type=int,
                         help='Number of workers for the tasks.')
     
-    parser.add_argument('--query_samples', default=0, type=int,
+    parser.add_argument('--query_samples', default=100, type=int,
                         help='Number of batches in the query loader.')
     
     parser.add_argument('--precision', default=32, type=int,
@@ -108,7 +108,7 @@ if __name__ == '__main__':
                         help='At what precision the model should train.')
     parser.add_argument('--grad_batch', default=1, type=int,
                         help='Accumulate gradient to simulate larger batch sizes.')
-    parser.add_argument('--grad_clip', default=5., type=float,
+    parser.add_argument('--grad_clip', default=0, type=float,
                         help='Clip the gradient norm.')
     parser.add_argument('--plugins', default=None, type=str,
                         help='Modify the multi-gpu training path. See docs lightning docs for details.')
