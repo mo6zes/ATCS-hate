@@ -2,9 +2,10 @@ import os
 import argparse
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
-from protomaml import ProtoMAML
+from protomaml.protomaml import ProtoMAML
 
-from dataloader import create_metaloader, DataTwitterDavid, generate_tasks_from_dataset
+from .data_utils import generate_tasks_from_dataset, create_metaloader
+from data.datasets import DataTwitterDavidson
 
 
 class LogCallback(pl.Callback):
@@ -28,8 +29,10 @@ def train(args):
     os.makedirs(args.log_dir, exist_ok=True)
     
     # create dataloaders
-    dataset = DataTwitterDavid("./datasets/data-twitter-david.csv")
-    tasks = generate_tasks_from_dataset(dataset, support_examples=args.inner_updates, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
+    dataset = DataTwitterDavidson()
+    tasks = generate_tasks_from_dataset(dataset, support_examples=args.inner_updates,
+                                        batch_size=args.batch_size, shuffle=True,
+                                        num_workers=args.num_workers)
     meta_loader = create_metaloader(tasks, batch_size=args.meta_batch_size, shuffle=True)
 
     # Create a PyTorch Lightning trainer
@@ -93,6 +96,12 @@ if __name__ == '__main__':
                         help='Batch size for training.')
     parser.add_argument('--meta_batch_size', default=16, type=int,
                         help='Amount of tasks.')
+    
+    parser.add_argument('--num_workers', default=0, type=int,
+                        help='Number of workers for the tasks.')
+    
+    parser.add_argument('--query_samples', default=0, type=int,
+                        help='Number of batches in the query loader.')
     
     parser.add_argument('--precision', default=32, type=int,
                         choices=[16, 32],
