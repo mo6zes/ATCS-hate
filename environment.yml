@@ -88,4 +88,3 @@ dependencies:
   - zlib=1.2.11=h62dcd97_1010
   - pip:
     - higher==0.2.1
-prefix: C:\Programs\miniconda3\envs\atcs
