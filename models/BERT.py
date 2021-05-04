@@ -31,7 +31,7 @@ class BERT(nn.Module):
 
 			
 	def unfreeze_module(self, module_instance=nn.LayerNorm):
-		for module in self.learner.modules():
+		for module in self.modules():
 			if isinstance(module, module_instance):
 				for param in module.parameters():
 					param.requires_grad = True
