@@ -35,11 +35,11 @@ class DataFoxNews(Dataset):
     """
     Dataset Class for the fox news dataset
     """
-    def __init__(self, json_file_dir:str):
+    def __init__(self, json_file_dir:str='./raw_datasets/fox-news-comments.json'):
         self.text = []
         self.labels = []
 
-        with open(json_file_dir, mode='r') as jsonfile:
+        with open(os.path.join(os.path.dirname(__file__),json_file_dir), mode='r') as jsonfile:
             content = json.load(jsonfile)
 
             for data in content:
@@ -178,6 +178,13 @@ class QuianData(Dataset):
                 wr.writerow(new_header)
             wr.writerows(data)
 
+
+ALL_DATASETS = {
+    'twitter_davidson': DataTwitterDavidson,
+    'fox_news': DataFoxNews,
+    'degilbert_storefront': DeGilbertStormFront,
+    'quian': QuianData
+}
 
 # if __name__ == "__main__":
 #     data_dir = './data/gabQuian.csv'
