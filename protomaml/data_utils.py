@@ -65,6 +65,9 @@ def create_dataloader(dataset, batch_size=1, shuffle=False, num_workers=0,
 def generate_tasks_from_dataset(dataset, num_tasks=None, support_examples=100,
                                 query_examples=100, **kwargs):
     """Slice in a dataset to return a list of Tasks."""
+    # TODO I believe that in the meta dataset paper they had some rules on the number of sample in the support and query
+    # for example that at least 1 of each class must be represented in the support, we might have to look into that
+
     interval = len(dataset) // (support_examples*kwargs['batch_size'] + query_examples*kwargs['batch_size'])
     if num_tasks and interval > num_tasks:
         interval = num_tasks
