@@ -64,8 +64,9 @@ class DeGilbertStormFront(Dataset):
         self.labels = []
         self.label_dict = {'noHate': 0, 'hate': 1}
 
-        with open(csv_file_dir, mode='r') as csvfile:
+        with open(csv_file_dir, mode='r', encoding="utf8") as csvfile:
             reader = csv.DictReader(csvfile)
+
             for row in reader:
                 self.tweets.append(row['text'])
                 self.labels.append(torch.tensor(int(self.label_dict[row['label']]), dtype=torch.long))
@@ -82,7 +83,7 @@ class DeGilbertStormFront(Dataset):
 
     def create_data_csv_file(csv_annotations_dir='../data/deGilbert/annotations_metadata.csv'):
 
-        with open(csv_annotations_dir, mode='r') as csvfile:
+        with open(csv_annotations_dir, mode='r', encoding="utf8") as csvfile:
             reader = csv.DictReader(csvfile)
             data = []
 
@@ -176,7 +177,7 @@ class QuianData(Dataset):
             wr.writerows(data)
 
 
-# if __name__ == "__main__":
-#     data_dir = './data/gabQuian.csv'
-#     dataset = DataGabQuian(data_dir)
+if __name__ == "__main__":
+    data_dir = './data/deGilbertStormfront.csv'
+    dataset = DeGilbertStormFront(data_dir)
 
