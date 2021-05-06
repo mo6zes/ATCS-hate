@@ -1,4 +1,3 @@
-
 import json
 import csv
 import os
@@ -35,11 +34,11 @@ class DataFoxNews(Dataset):
     """
     Dataset Class for the fox news dataset
     """
-    def __init__(self, json_file_dir:str='./raw_datasets/fox-news-comments.json'):
+    def __init__(self, json_file_dir:str="./raw_datasets/fox-news-comments.json"):
         self.text = []
         self.labels = []
 
-        with open(os.path.join(os.path.dirname(__file__),json_file_dir), mode='r') as jsonfile:
+        with open(os.path.join(os.path.dirname(__file__), json_file_dir), mode='r') as jsonfile:
             content = json.load(jsonfile)
 
             for data in content:
@@ -61,12 +60,12 @@ class DeGilbertStormFront(Dataset):
     """
     Dataset for DeGilbert Dataset based on Storm Front forum
     """
-    def __init__(self, csv_file_dir:str):
+    def __init__(self, csv_file_dir:str="./raw_datasets/deGilbertStormfront.csv"):
         self.tweets = []
         self.labels = []
         self.label_dict = {'noHate': 0, 'hate': 1}
 
-        with open(csv_file_dir, mode='r') as csvfile:
+        with open(os.path.join(os.path.dirname(__file__), csv_file_dir), mode='r') as csvfile:
             reader = csv.DictReader(csvfile)
             for row in reader:
                 self.tweets.append(row['text'])
@@ -111,19 +110,19 @@ class QuianData(Dataset):
     """
     Quian Dataset which is the same for Gab and Reddit which can be indicated with flag
     """
-    def __init__(self, csv_file_dir: str, raw_csv_file_dir: str,
-                 save_new_csv_dir: str):
+    def __init__(self, csv_file_dir: str="./raw_datasets/gabQuian.csv", raw_csv_file_dir: str=None,
+                 save_new_csv_dir: str=None):
         self.tweets = []
         self.labels = []
 
         self.label_dict = {'noHate': 0, 'hate': 1}
 
-        self.data_flag  # TODO
+        self.data_flag = None  # TODO
 
         self.raw_csv = raw_csv_file_dir
         self.save_dir = save_new_csv_dir
 
-        with open(csv_file_dir, mode='r', encoding="utf8") as csvfile:
+        with open(os.path.join(os.path.dirname(__file__), csv_file_dir), mode='r', encoding="utf8") as csvfile:
             reader = csv.DictReader(csvfile)
             for row in reader:
                 self.tweets.append(row['text'])

@@ -34,4 +34,3 @@ class BERT(nn.Module):
             if isinstance(module, module_instance):
                 for param in module.parameters():
                     param.requires_grad = True
-
