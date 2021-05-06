@@ -3,9 +3,10 @@ import argparse
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 import torch
+
+from data.datasets import DataFoxNews, DataTwitterDavidson
 from data_utils import TakeTurnLoader
 from knn import KNNBaseline
-from data.datasets import ALL_DATASETS
 import wandb
 from pytorch_lightning.loggers import WandbLogger  # newline 1
 
@@ -32,7 +33,7 @@ def train(args):
     os.makedirs(args.log_dir, exist_ok=True)
 
     # create dataloaders
-    datasets = [ALL_DATASETS['fox_news'](), ALL_DATASETS['twitter_davidson']()]
+    datasets = [DataFoxNews(), DataTwitterDavidson()]
 
     # TODO split in training, val test based. Maybe leave out a task? Keep in mind that datasets have different sizes
     dl = TakeTurnLoader(datasets)

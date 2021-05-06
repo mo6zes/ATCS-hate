@@ -4,7 +4,8 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader, Subset, ConcatDataset
 import math
 import bisect
-from data.datasets import ALL_DATASETS
+
+from data.datasets import DataFoxNews, DataTwitterDavidson
 from models.model_utils import create_tokenizer
 from protomaml.data_utils import create_dataloader, prepare_batch
 from torch.utils.data.sampler import RandomSampler
@@ -47,7 +48,7 @@ class TakeTurnLoader:
 
 
 if __name__ == "__main__":
-    datasets = [ALL_DATASETS['fox_news'](), ALL_DATASETS['twitter_davidson']()]
+    datasets = [DataFoxNews(), DataTwitterDavidson()]
 
     dl = TakeTurnLoader(datasets)
 
