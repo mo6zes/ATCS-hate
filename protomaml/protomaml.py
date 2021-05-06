@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import higher
+import transformers
 import pytorch_lightning as pl
 import torchmetrics.functional as f
 
@@ -14,9 +15,13 @@ class ProtoMAML(pl.LightningModule):
         self.automatic_optimization=False
         
         self.model = BERT(model, hidden_size=hidden_size, output_size=output_size)
+#         self.model.unfreeze_module(nn.LayerNorm)
         self.model.train()
         
-        self.protolayer = nn.Linear(output_size, 5)
+        # protolayer weight and bias
+        self.weight = 0 
+        self.bias = 0
+        self.output_lr = 5e-4
         
     def feature_forward(self, x):
         return self.model(x)
@@ -49,7 +54,7 @@ class ProtoMAML(pl.LightningModule):
                     batch_x = [i.to(self.device) for i in batch_x]
                     batch_y = batch_y.to(self.device)
                     pred_y = self.model(batch_x)
-                    self.calculate_prototypes(pred_y, batch_y, task.n_classes)
+                    weight, bias = self.calculate_prototypes(pred_y, batch_y, task.n_classes)
                     break
             del batch_x
             del batch_y
@@ -69,22 +74,32 @@ class ProtoMAML(pl.LightningModule):
                     batch_x, batch_y = next(data_iter)
                     batch_x = [i.to(self.device) for i in batch_x]
                     batch_y = batch_y.to(self.device)
-                    pred_y = self.protolayer(fmodel(batch_x))
+                    pred_y = self.protolayer(fmodel(batch_x), weight, bias)
                     support_loss = F.cross_entropy(pred_y, batch_y)
+                    
+                    weight_grad, bias_grad = torch.autograd.grad(support_loss, [self.weight, self.bias], retain_graph=True)
+                    self.weight = self.weight - opt.param_groups[0]['lr'] * weight_grad
+                    self.bias = self.bias - opt.param_groups[0]['lr'] * bias_grad
+                    
                     diffopt.step(support_loss)
+                    
                     support_loss_list.append(support_loss.detach())
                     support_acc_list.append(f.accuracy(F.softmax(pred_y.detach(), dim=-1), batch_y.detach()))
 
                 # subsitute the orgininal prototypes back in the grad graph.
                 # this might be unnesesairy, but i'm unsure
-                self.protolayer.weight = torch.nn.Parameter(2*self.prototypes + (self.protolayer.weight - (2*self.prototypes)).detach())
-                self.protolayer.bias = torch.nn.Parameter(-(self.prototypes.norm(dim=-1)**2) + (self.protolayer.bias + (self.prototypes.norm(dim=-1)**2)).detach())
+#                 self.protolayer.weight = torch.nn.Parameter(2*self.prototypes + (self.protolayer.weight - (2*self.prototypes)).detach())
+#                 self.protolayer.bias = torch.nn.Parameter(-(self.prototypes.norm(dim=-1)**2) + (self.protolayer.bias + (self.prototypes.norm(dim=-1)**2)).detach())
 
                 # abtain the gradient on the query set
+                for module in fmodel.modules():
+                    if isinstance(module, nn.Dropout):
+                        module.eval()
+    
                 for batch_x, batch_y in query_loader:
                     batch_x = [i.to(self.device) for i in batch_x]
                     batch_y = batch_y.to(self.device)
-                    pred_y = self.protolayer(fmodel(batch_x))
+                    pred_y = self.protolayer(fmodel(batch_x), weight, bias)
                     query_loss = F.cross_entropy(pred_y, batch_y)
                     query_loss_list.append(query_loss.detach())
                     query_acc_list.append(f.accuracy(F.softmax(pred_y.detach(), dim=-1), batch_y.detach()))
@@ -93,6 +108,9 @@ class ProtoMAML(pl.LightningModule):
                     # set create_graph=True for higher order derivatives
                     grads = torch.autograd.grad(query_loss, filter(lambda p: p.requires_grad, fmodel.parameters()), retain_graph=True)
                     meta_grads = torch.autograd.grad(query_loss, filter(lambda p: p.requires_grad, self.model.parameters()), retain_graph=True)
+                    
+#                     torch.nn.utils.clip_grad_norm_(filter(lambda p: p.requires_grad, fmodel.parameters()), self.hparams.grad_clip)
+#                     torch.nn.utils.clip_grad_norm_(filter(lambda p: p.requires_grad, self.model.parameters()), self.hparams.grad_clip)
                     
                     # save the gradients in the model
                     for param, grad, meta_grad in zip(filter(lambda p: p.requires_grad, self.model.parameters()), grads, meta_grads):
@@ -104,7 +122,6 @@ class ProtoMAML(pl.LightningModule):
         # update the original model parameters and reset the gradients
         opt.step()
         self.zero_grad(self.model)
-        self.zero_grad(self.protolayer)
 
         # calculate the loss 
         support_loss = torch.stack(support_loss_list).mean()
@@ -115,10 +132,16 @@ class ProtoMAML(pl.LightningModule):
         query_acc = torch.stack(query_acc_list).mean()
 
         # log the loss
-        self.log("train_query_loss", query_loss, on_step=False, on_epoch=True)
         self.log("train_support_loss", support_loss, on_step=False, on_epoch=True)
-        self.log("train_query_acc", query_acc, on_step=False, on_epoch=True)
         self.log("train_support_acc", support_acc, on_step=False, on_epoch=True)
+        self.log("train_query_loss", query_loss, on_step=False, on_epoch=True)
+        self.log("train_query_acc", query_acc, on_step=False, on_epoch=True)
+        
+        # Log to progress bar
+        self.log("s_loss", support_loss, on_step=True, on_epoch=False, logger=False, prog_bar=True)
+        self.log("s_acc", support_acc, on_step=True, on_epoch=False, logger=False, prog_bar=True)
+        self.log("q_loss", query_loss, on_step=True, on_epoch=False, logger=False, prog_bar=True)
+        self.log("q_acc", query_acc, on_step=True, on_epoch=False, logger=False, prog_bar=True)
     
     # not realldy done yet.
     def validation_step(self, batch, batch_indx):
@@ -128,7 +151,8 @@ class ProtoMAML(pl.LightningModule):
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, self.model.parameters()),
                                     lr=self.hparams.lr, weight_decay=self.hparams.weight_decay)
-        return optimizer
+        lr_scheduler = transformers.get_constant_schedule_with_warmup(optimizer, num_warmup_steps=30)
+        return [optimizer], [lr_scheduler]
     
     def calculate_prototypes(self, model_output, labels, n_classes):
         prototypes = torch.zeros((n_classes, model_output.shape[-1]), device=self.device)
@@ -139,8 +163,12 @@ class ProtoMAML(pl.LightningModule):
         self.prototypes = prototypes
         weight = 2 * prototypes.clone()
         bias = -(prototypes.clone().norm(dim=-1)**2)
-        self.protolayer.weight = torch.nn.Parameter(weight.detach())
-        self.protolayer.bias = torch.nn.Parameter(bias.detach())
+        self.weight = torch.zeros_like(weight.detach(), requires_grad=True)
+        self.bias = torch.zeros_like(bias.detach(), requires_grad=True)
+        return weight, bias
+        
+    def protolayer(self, tensor, weight, bias):
+        return F.linear(tensor, self.weight+weight, self.bias+bias)
         
     def zero_grad(self, module):
         for param in filter(lambda p: p.requires_grad, module.parameters()):

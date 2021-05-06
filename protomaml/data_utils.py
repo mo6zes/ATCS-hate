@@ -63,7 +63,7 @@ def create_dataloader(dataset, batch_size=1, shuffle=False, num_workers=0,
 
 
 def generate_tasks_from_dataset(dataset, num_tasks=None, support_examples=100,
-                                query_examples=100, **kwargs):
+                                query_examples=10, **kwargs):
     """Slice in a dataset to return a list of Tasks."""
     interval = len(dataset) // (support_examples*kwargs['batch_size'] + query_examples*kwargs['batch_size'])
     if num_tasks and interval > num_tasks:
@@ -86,4 +86,23 @@ def generate_tasks_from_dataset(dataset, num_tasks=None, support_examples=100,
                     task_id = i,
                     n_classes = dataset.n_classes)
         tasks.append(task)
+        
+    # deal with rest.
+    if (num_tasks is None) or (num_tasks and len(tasks) < num_tasks):
+        task_ratio = 0.8
+        start = interval*(support_examples*kwargs['batch_size'] + query_examples*kwargs['batch_size'])
+        support = Subset(dataset, range(start, start+int((len(dataset)-start)*task_ratio)))
+        start += int((len(dataset)-start)*task_ratio)
+        query = Subset(dataset, range(start, len(dataset)))
+        task = Task(task_name = dataset.task_name,
+                    support_loader = create_dataloader(support, batch_size=kwargs['batch_size'],
+                                                       shuffle=kwargs['shuffle'],
+                                                       num_workers=kwargs['num_workers']),
+                    query_loader = create_dataloader(query, batch_size=kwargs['batch_size'],
+                                                       shuffle=kwargs['shuffle'],
+                                                       num_workers=kwargs['num_workers']),
+                    task_id = interval+1,
+                    n_classes = dataset.n_classes)
+        tasks.append(task)
+    
     return tasks

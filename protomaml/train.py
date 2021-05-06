@@ -1,10 +1,11 @@
 import os
 import argparse
 import pytorch_lightning as pl
-from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 from protomaml.protomaml import ProtoMAML
 
-from .data_utils import generate_tasks_from_dataset, create_metaloader
+from .utils import generate_tasks
+from .data_utils import create_metaloader
 from data.datasets import DataTwitterDavidson
 
 
@@ -29,17 +30,16 @@ def train(args):
     os.makedirs(args.log_dir, exist_ok=True)
     
     # create dataloaders
-    dataset = DataTwitterDavidson()
-    tasks = generate_tasks_from_dataset(dataset, support_examples=args.inner_updates,
-                                        batch_size=args.batch_size, shuffle=True,
-                                        num_workers=args.num_workers)
+    tasks = generate_tasks(args)
+    print(f"Training using {len(tasks)} tasks.")
     meta_loader = create_metaloader(tasks, batch_size=args.meta_batch_size, shuffle=True)
 
     # Create a PyTorch Lightning trainer
     callbacks = []
     modelcheckpoint = ModelCheckpoint(monitor='train_query_acc', mode='max', save_top_k=1,
-                                      save_last=True, filename='{epoch}-{train_query_loss:.4f}-{train_query_acc:.3f}')
+                                      save_last=True, filename='{epoch}-{train_query_loss:.3f}-{train_query_acc:.3f}')
     callbacks.append(modelcheckpoint)
+    callbacks.append(LearningRateMonitor())
     callbacks.append(LogCallback())
     if not args.progress_bar:
         callbacks.append(PrintCallback())

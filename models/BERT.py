@@ -29,10 +29,8 @@ class BERT(nn.Module):
         for param in self.bert.base_model.parameters():
             param.requires_grad = False
 
-			
-	def unfreeze_module(self, module_instance=nn.LayerNorm):
-		for module in self.modules():
-			if isinstance(module, module_instance):
-				for param in module.parameters():
-					param.requires_grad = True
-
+    def unfreeze_module(self, module_instance=nn.LayerNorm):
+        for module in self.modules():
+            if isinstance(module, module_instance):
+                for param in module.parameters():
+                    param.requires_grad = True
