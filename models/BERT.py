@@ -23,16 +23,15 @@ class BERT(nn.Module):
         output = self.bert(input, attention_mask=attention_mask)
         # we only take the hidden state of the CLS token.
         output = self.mlp(output.last_hidden_state[:, 0, :])
-        return output #[B, C]
+        return output  # [B, C]
 
     def freeze_bert(self):
         for param in self.bert.base_model.parameters():
             param.requires_grad = False
 
-			
-	def unfreeze_module(self, module_instance=nn.LayerNorm):
-		for module in self.modules():
-			if isinstance(module, module_instance):
-				for param in module.parameters():
-					param.requires_grad = True
+    def unfreeze_module(self, module_instance=nn.LayerNorm):
+        for module in self.modules():
+            if isinstance(module, module_instance):
+                for param in module.parameters():
+                    param.requires_grad = True
 
