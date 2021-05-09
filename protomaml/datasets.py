@@ -177,6 +177,37 @@ class QuianData(Dataset):
             wr.writerows(data)
 
 
+class RezvanHarrassment(Dataset):
+    def __init__(self, csv_file_dir:str):
+        self.tweets = []
+        self.labels = []
+
+        self.label_dict = {
+            'no': 0, 
+            'appearance': 1,
+            'intelligence': 2,
+            'political': 3,
+            'racial': 4,
+            'sexual': 5}
+        
+        with open(csv_file_dir, mode='r') as csvfile:
+            reader = csv.DictReader(csvfile)
+
+            for row in reader:
+                self.tweets.append(row['Tweets'])
+                self.labels.append(torch.tensor(int(self.label_dict[row['Decision']]), dtype=torch.long))
+
+        assert len(self.tweets) == len(self.labels)
+        self.n_classes = torch.numel(torch.unique(torch.tensor(self.labels)))
+        self.task_name = csv_file_dir.split("/")[-1]
+
+    def __len__(self):
+        return len(self.tweets)
+
+    def __getitem__(self, idx):
+        return self.tweets[idx], self.labels[idx]
+
+
 if __name__ == "__main__":
     data_dir = './data/deGilbertStormfront.csv'
     dataset = DeGilbertStormFront(data_dir)
