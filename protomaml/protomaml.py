@@ -21,7 +21,7 @@ class ProtoMAML(pl.LightningModule):
         # protolayer weight and bias
         self.weight = 0 
         self.bias = 0
-        self.output_lr = 5e-4
+        self.output_lr = 1e-2
         
     def feature_forward(self, x):
         return self.model(x)
@@ -78,8 +78,8 @@ class ProtoMAML(pl.LightningModule):
                     support_loss = F.cross_entropy(pred_y, batch_y)
                     
                     weight_grad, bias_grad = torch.autograd.grad(support_loss, [self.weight, self.bias], retain_graph=True)
-                    self.weight = self.weight - opt.param_groups[0]['lr'] * weight_grad
-                    self.bias = self.bias - opt.param_groups[0]['lr'] * bias_grad
+                    self.weight = self.weight - self.output_lr * weight_grad
+                    self.bias = self.bias - self.output_lr * bias_grad
                     
                     diffopt.step(support_loss)
                     
@@ -151,7 +151,7 @@ class ProtoMAML(pl.LightningModule):
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, self.model.parameters()),
                                     lr=self.hparams.lr, weight_decay=self.hparams.weight_decay)
-        lr_scheduler = transformers.get_constant_schedule_with_warmup(optimizer, num_warmup_steps=30)
+        lr_scheduler = transformers.get_constant_schedule_with_warmup(optimizer, num_warmup_steps=5)
         return [optimizer], [lr_scheduler]
     
     def calculate_prototypes(self, model_output, labels, n_classes):

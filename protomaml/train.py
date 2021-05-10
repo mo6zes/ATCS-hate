@@ -1,7 +1,7 @@
 import os
 import argparse
 import pytorch_lightning as pl
-from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
+from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor, EarlyStopping
 from protomaml.protomaml import ProtoMAML
 
 from .utils import generate_tasks
@@ -41,6 +41,7 @@ def train(args):
     callbacks.append(modelcheckpoint)
     callbacks.append(LearningRateMonitor())
     callbacks.append(LogCallback())
+    callbacks.append(EarlyStopping(monitor='train_query_acc', mode='max', patience=8))
     if not args.progress_bar:
         callbacks.append(PrintCallback())
         
@@ -90,7 +91,7 @@ if __name__ == '__main__':
     parser = ProtoMAML.add_model_specific_args(parser)
     
     # trainer hyperparameters
-    parser.add_argument('--epochs', default=30, type=int,
+    parser.add_argument('--epochs', default=50, type=int,
                         help='Number of epochs to train.')
     parser.add_argument('--batch_size', default=64, type=int,
                         help='Batch size for training.')
