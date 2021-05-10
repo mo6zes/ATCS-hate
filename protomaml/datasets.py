@@ -2,6 +2,7 @@ import torch
 import json
 import csv
 import os
+import re
 from string import punctuation
 from torch.utils.data import Dataset, DataLoader
 
@@ -208,7 +209,45 @@ class RezvanHarrassment(Dataset):
         return self.tweets[idx], self.labels[idx]
 
 
+class FountaDataset(Dataset):
+
+    def __init__(self, csv_file_dir:str):
+        self.tweets = []
+        self.labels = []
+
+        self.label_dict = {
+            'normal': 0, 
+            'abusive': 1,
+            'spam': 2,
+            'hateful': 3
+        }
+        
+        with open(csv_file_dir, mode='r', encoding="utf8") as csvfile:
+            reader = csv.reader(csvfile)
+            
+            for row in reader:
+                s = ' '
+                data = s.join(row)
+                data_split = re.split(r'\t+', data)
+                
+                tweet = data_split[0]
+                label = data_split[1]
+    
+                self.tweets.append(tweet)
+                self.labels.append(torch.tensor(int(self.label_dict[label]), dtype=torch.long))
+
+        assert len(self.tweets) == len(self.labels)
+        self.n_classes = torch.numel(torch.unique(torch.tensor(self.labels)))
+        self.task_name = csv_file_dir.split("/")[-1]
+
+    def __len__(self):
+        return len(self.tweets)
+
+    def __getitem__(self, idx):
+        return self.tweets[idx], self.labels[idx]
+
+
 if __name__ == "__main__":
-    data_dir = './data/deGilbertStormfront.csv'
-    dataset = DeGilbertStormFront(data_dir)
+    data_dir = './data/fountaCombined.csv'
+    dataset = FountaDataset(data_dir)
 
