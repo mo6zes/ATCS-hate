@@ -16,6 +16,8 @@ class TakeTurnLoader:
     Datasets take turns for returning a batch. Mode can be "oversample" or "undersample". In oversample mode all the data
     from the largest dataset will be returned once, smaller datasets will resample. In undersample mode the data for
     the smallest dataset will be returned once, some data in the largest data will not be returned in a batch.
+
+    TODO maybe turn into IterableDataset
     """
 
     def __init__(self, datasets, batch_size=32, shuffle=False, num_workers=0,

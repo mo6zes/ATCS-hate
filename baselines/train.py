@@ -47,7 +47,7 @@ def train(args):
     if not args.progress_bar:
         callbacks.append(PrintCallback())
 
-    wandb_logger = WandbLogger(project='atcs-hate', entity='modamsko')
+    wandb_logger = WandbLogger(project='hate-baseline', entity='atcs-project')
 
     trainer = pl.Trainer(default_root_dir=args.log_dir,
                          auto_select_gpus=torch.cuda.is_available(),
