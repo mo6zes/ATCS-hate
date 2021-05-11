@@ -67,7 +67,7 @@ class DeGilbertStormFront(Dataset):
         self.labels = []
         self.label_dict = {'noHate': 0, 'hate': 1}
 
-        with open(os.path.join(os.path.dirname(__file__), csv_file_dir), mode='r') as csvfile:
+        with open(os.path.join(os.path.dirname(__file__), csv_file_dir), mode='r', encoding="utf8") as csvfile:
             reader = csv.DictReader(csvfile)
             for row in reader:
                 self.tweets.append(row['text'])
@@ -86,7 +86,7 @@ class DeGilbertStormFront(Dataset):
     @staticmethod
     def create_data_csv_file(csv_annotations_dir='../data/deGilbert/annotations_metadata.csv'):
 
-        with open(csv_annotations_dir, mode='r') as csvfile:
+        with open(csv_annotations_dir, mode='r', encoding="utf8") as csvfile:
             reader = csv.DictReader(csvfile)
             data = []
 
