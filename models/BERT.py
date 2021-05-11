@@ -17,7 +17,7 @@ class BERT(nn.Module):
                       nn.Linear(hidden_size, output_size),
                     ) if output_size > 0 else nn.Identity()
         
-    def feature_forward(self, x, attention_masks=None):
+    def feature_forward(self, x, attention_mask=None):
         return self.bert(x, attention_mask=attention_mask)
 
     def forward(self, x):
