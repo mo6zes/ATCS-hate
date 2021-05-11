@@ -10,6 +10,9 @@ from knn import KNNBaseline
 import wandb
 from pytorch_lightning.loggers import WandbLogger  # newline 1
 
+from protomaml.data_utils import create_dataloader, prepare_batch
+
+
 class LogCallback(pl.Callback):
     def __init__(self):
         super().__init__()
@@ -33,21 +36,50 @@ def train(args):
     os.makedirs(args.log_dir, exist_ok=True)
 
     # create dataloaders
-    datasets = [DataFoxNews(), DataTwitterDavidson()]
+    datasets = [DataTwitterDavidson(), DataFoxNews()]
+    #TODO random splitting might produce imbalanced classes in splits
+    train_datasets = []
+    val_datasets = []
+    test_datasets = []
+    for d in datasets:
+        train_length = int(args.split_fractions[0] * len(d))
+        val_length = int(args.split_fractions[1] * len(d))
+        test_length = len(d) - train_length - val_length
+
+        train_dataset, rest = torch.utils.data.random_split(d, [train_length, val_length + test_length])
+        val_dataset, test_dataset = torch.utils.data.random_split(rest, [val_length, test_length])
+        train_datasets.append(train_dataset)
+        val_datasets.append(val_dataset)
+        test_datasets.append(test_dataset)
+
 
     # TODO split in training, val test based. Maybe leave out a task? Keep in mind that datasets have different sizes
-    dl = TakeTurnLoader(datasets)
+    train_dl = [create_dataloader(d,
+                              batch_size=32,
+                              shuffle=False,
+                                num_workers=4,
+                              collate_fn=prepare_batch) for d in train_datasets]
+    val_dls = [create_dataloader(d,
+                              batch_size=32,
+                              shuffle=False,
+                                 num_workers=4,
+                              collate_fn=prepare_batch) for d in val_datasets]
+    test_dl = TakeTurnLoader(test_datasets)
+
+    print("Datasets")
+    print("Training datasets: ", len(train_dl))
+    print("Validation datasets: ", len(val_dls))
 
     # Create a PyTorch Lightning trainer
     callbacks = []
-    modelcheckpoint = ModelCheckpoint(monitor='train_acc', mode='max', save_top_k=1,
+    modelcheckpoint = ModelCheckpoint(monitor='train_total_loss', mode='min', save_top_k=1,
                                       save_last=True, filename='{epoch}-{train_loss:.4f}-{train_acc:.3f}')
     callbacks.append(modelcheckpoint)
-    callbacks.append(LogCallback())
+    # callbacks.append(LogCallback())
     if not args.progress_bar:
         callbacks.append(PrintCallback())
 
-    wandb_logger = WandbLogger(project='hate-baseline', entity='atcs-project')
+    wandb_logger = WandbLogger(project='hate-baseline', entity='atcs-project', config=vars(args))
 
     trainer = pl.Trainer(default_root_dir=args.log_dir,
                          auto_select_gpus=torch.cuda.is_available(),
@@ -57,13 +89,13 @@ def train(args):
                          auto_scale_batch_size='binsearch' if args.auto_batch else None,
                          auto_lr_find=True if args.auto_lr else False,
                          precision=args.precision,
-                         progress_bar_refresh_rate=1 if args.progress_bar else 0,
                          resume_from_checkpoint=args.checkpoint_path,
                          gradient_clip_val=args.grad_clip,
                          benchmark=True if args.benchmark else False,
                          plugins=args.plugins,
                          logger=wandb_logger if args.wandb else None,
-                         profiler=args.profiler if args.profiler else None)
+                         profiler=args.profiler if args.profiler else None,
+                         multiple_trainloader_mode='max_size_cycle')
     trainer.logger._default_hp_metric = None
     trainer.logger._log_graph = False
 
@@ -79,8 +111,7 @@ def train(args):
     # Training
     # with torch.autograd.set_detect_anomaly(True):
     # TODO this might be problematic, not supplying a real dataloader, only something iterable.
-    trainer.tune(model, train_dataloader=dl)
-    trainer.fit(model, train_dataloader=dl)
+    trainer.fit(model, train_dataloader=train_dl, val_dataloaders=val_dls)
     print(modelcheckpoint.best_model_path)
     # trainer.test(test_dataloaders=test_loader)
 
@@ -97,6 +128,8 @@ if __name__ == '__main__':
                         help='Number of epochs to train.')
     parser.add_argument('--batch_size', default=64, type=int,
                         help='Batch size for training.')
+    parser.add_argument('--split_fractions', default="0.8,0.1,0.1", type=lambda x: [float(f) for f in x.split(',')],
+                        help='Split fractions e.g.: 0.8,0.1,0.1')
 
     parser.add_argument('--num_workers', default=0, type=int,
                         help='Number of workers for the tasks.')
