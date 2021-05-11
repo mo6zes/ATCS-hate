@@ -5,16 +5,17 @@ import higher
 import transformers
 import pytorch_lightning as pl
 import torchmetrics.functional as f
+from copy import deepcopy
 
 from models.BERT import BERT
 
 class ProtoMAML(pl.LightningModule):
-    def __init__(self, model='bert-base-uncased', hidden_size=512, output_size=512, inner_updates=100, lr=1e-2, weight_decay=0, **kwargs):
+    def __init__(self, model='bert-base-uncased', hidden_size=512, output_size=512, gradient_checkpointing=False, inner_updates=100, lr=1e-2, weight_decay=0, **kwargs):
         super().__init__()
         self.save_hyperparameters()
         self.automatic_optimization=False
         
-        self.model = BERT(model, hidden_size=hidden_size, output_size=output_size)
+        self.model = BERT(model, hidden_size=hidden_size, output_size=output_size, gradient_checkpointing=gradient_checkpointing)
         # self.model.unfreeze_module(nn.LayerNorm)
         self.model.train()
         
@@ -35,8 +36,10 @@ class ProtoMAML(pl.LightningModule):
         # keep track of the loss and accuracy (for logging)
         support_loss_list = []
         support_acc_list = []
+        support_f1_list = []
         query_loss_list = []
         query_acc_list = []
+        query_f1_list = []
         
         # get the optimizer
         opt = self.optimizers()
@@ -48,21 +51,12 @@ class ProtoMAML(pl.LightningModule):
             query_loader = task.query_loader
             
             # create prototype layer
-            loader = iter(support_loader)
-            for batch_x, batch_y in loader:
-                if torch.numel(torch.unique(batch_y)) == task.n_classes:
-                    batch_x = [i.to(self.device) for i in batch_x]
-                    batch_y = batch_y.to(self.device)
-                    pred_y = self.model(batch_x)
-                    weight, bias = self.calculate_prototypes(pred_y, batch_y, task.n_classes)
-                    break
-            del batch_x
-            del batch_y
+            weight, bias = self.calculate_prototypes(support_loader, task.n_classes)
             
             # perform the inner loops
             # clone the model and create a differentiable optimizer
             # higher creates a differentiable inner loop for us
-            with higher.innerloop_ctx(self.model, opt.optimizer, copy_initial_weights=False) as (fmodel, diffopt):
+            with higher.innerloop_ctx(self.model, opt.optimizer, copy_initial_weights=False, track_higher_grads=True) as (fmodel, diffopt):
                 # ensure that our model is trainable and reset the gradients.
                 self.train()
                 fmodel.train()
@@ -85,11 +79,12 @@ class ProtoMAML(pl.LightningModule):
                     
                     support_loss_list.append(support_loss.detach())
                     support_acc_list.append(f.accuracy(F.softmax(pred_y.detach(), dim=-1), batch_y.detach()))
+                    support_f1_list.append(f.f1(F.softmax(pred_y.detach(), dim=-1), batch_y.detach()))
 
                 # subsitute the orgininal prototypes back in the grad graph.
                 # this might be unnesesairy, but i'm unsure
-#                 self.protolayer.weight = torch.nn.Parameter(2*self.prototypes + (self.protolayer.weight - (2*self.prototypes)).detach())
-#                 self.protolayer.bias = torch.nn.Parameter(-(self.prototypes.norm(dim=-1)**2) + (self.protolayer.bias + (self.prototypes.norm(dim=-1)**2)).detach())
+                self.weight = torch.zeros_like(weight, requires_grad=True) + (self.weight - torch.zeros_like(weight, requires_grad=True)).detach()
+                self.bias = torch.zeros_like(bias, requires_grad=True) + (self.bias - torch.zeros_like(bias, requires_grad=True)).detach()
 
                 # abtain the gradient on the query set
                 for module in fmodel.modules():
@@ -103,6 +98,7 @@ class ProtoMAML(pl.LightningModule):
                     query_loss = F.cross_entropy(pred_y, batch_y)
                     query_loss_list.append(query_loss.detach())
                     query_acc_list.append(f.accuracy(F.softmax(pred_y.detach(), dim=-1), batch_y.detach()))
+                    query_f1_list.append(f.f1(F.softmax(pred_y.detach(), dim=-1), batch_y.detach()))
                     
                     # calculate the gradients
                     # set create_graph=True for higher order derivatives
@@ -130,12 +126,18 @@ class ProtoMAML(pl.LightningModule):
         # calculate accuracy
         support_acc = torch.stack(support_acc_list).mean()
         query_acc = torch.stack(query_acc_list).mean()
+        
+        # f1
+        support_f1 = torch.stack(support_f1_list).mean()
+        query_f1 = torch.stack(query_f1_list).mean()
 
         # log the loss
         self.log("train_support_loss", support_loss, on_step=False, on_epoch=True)
-        self.log("train_support_acc", support_acc, on_step=False, on_epoch=True)
         self.log("train_query_loss", query_loss, on_step=False, on_epoch=True)
+        self.log("train_support_acc", support_acc, on_step=False, on_epoch=True)
         self.log("train_query_acc", query_acc, on_step=False, on_epoch=True)
+        self.log("train_support_f1", support_f1, on_step=False, on_epoch=True)
+        self.log("train_query_f1", query_f1, on_step=False, on_epoch=True)
         
         # Log to progress bar
         self.log("s_loss", support_loss, on_step=True, on_epoch=False, logger=False, prog_bar=True)
@@ -143,28 +145,40 @@ class ProtoMAML(pl.LightningModule):
         self.log("q_loss", query_loss, on_step=True, on_epoch=False, logger=False, prog_bar=True)
         self.log("q_acc", query_acc, on_step=True, on_epoch=False, logger=False, prog_bar=True)
     
-    # not realldy done yet.
-    def validation_step(self, batch, batch_indx):
-        raise NotImplementedError
-        return loss
-    
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, self.model.parameters()),
-                                    lr=self.hparams.lr, weight_decay=self.hparams.weight_decay)
+        optimizer = torch.optim.Adam([{'params': filter(lambda p: p.requires_grad, self.model.bert.base_model.parameters())},
+                                      {'params': filter(lambda p: p.requires_grad, self.model.mlp.parameters()), 'lr': self.hparams.lr*10}],
+                                      lr=self.hparams.lr, weight_decay=self.hparams.weight_decay)
         lr_scheduler = transformers.get_constant_schedule_with_warmup(optimizer, num_warmup_steps=5)
         return [optimizer], [lr_scheduler]
     
-    def calculate_prototypes(self, model_output, labels, n_classes):
+    def init_prototypes(self, model_output, labels, n_classes):
         prototypes = torch.zeros((n_classes, model_output.shape[-1]), device=self.device)
         for c in range(n_classes):
             indices = torch.nonzero(labels == c).view(-1)
             if indices.numel() != 0:
                 prototypes[c] = torch.mean(model_output.index_select(0, indices), dim=0)
         self.prototypes = prototypes
-        weight = 2 * prototypes.clone()
-        bias = -(prototypes.clone().norm(dim=-1)**2)
-        self.weight = torch.zeros_like(weight.detach(), requires_grad=True)
-        self.bias = torch.zeros_like(bias.detach(), requires_grad=True)
+        weight = 2 * self.prototypes
+        bias = -(self.prototypes.norm(dim=-1)**2)
+        self.weight = torch.zeros_like(weight, requires_grad=True)
+        self.bias = torch.zeros_like(bias, requires_grad=True)
+        return weight, bias
+    
+    def calculate_prototypes(self, support_loader, n_classes):
+        loader = iter(support_loader)
+        res = []
+        label = []
+        for batch_x, batch_y in loader:
+            batch_x = [i.to(self.device) for i in batch_x]
+            batch_y = batch_y.to(self.device)
+            pred_y = self.model(batch_x)
+            res.append(pred_y)
+            label.append(batch_y)
+        weight, bias = self.init_prototypes(torch.cat(res, dim=0), torch.cat(label, dim=0), n_classes)
+        del res
+        del label
+        del loader
         return weight, bias
         
     def protolayer(self, tensor, weight, bias):
@@ -189,9 +203,9 @@ class ProtoMAML(pl.LightningModule):
                             help='Number of steps taken in the inner loop.')
 
         # Optimizer hyperparameters
-        parser.add_argument('--lr', default=1e-3, type=float,
+        parser.add_argument('--lr', default=1e-4, type=float,
                             help='Learning rate to use.')
-        parser.add_argument('--weight_decay', default=0, type=float,
+        parser.add_argument('--weight_decay', default=1e-6, type=float,
                             help='Weight decay.')
         
         return parent_parser
