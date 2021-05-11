@@ -1,10 +1,12 @@
+import torch
+import numpy as np
 import json
 import csv
 import os
+import re
 from string import punctuation
+from torch.utils.data import Dataset, DataLoader, Sampler
 
-import torch
-from torch.utils.data import Dataset, DataLoader
 
 class DataTwitterDavidson(Dataset):
     """
@@ -176,6 +178,121 @@ class QuianData(Dataset):
             if os.stat(new_file_name).st_size == 0:  # TODO; new_file_name does not exist
                 wr.writerow(new_header)
             wr.writerows(data)
+            
+class RezvanHarrassment(Dataset):
+    def __init__(self, csv_file_dir: str="./raw_datasets/rezvanData.csv"):
+        self.tweets = []
+        self.labels = []
+
+        self.label_dict = {
+            'no': 0, 
+            'appearance': 1,
+            'intelligence': 2,
+            'political': 3,
+            'racial': 4,
+            'sexual': 5}
+        
+        with open(os.path.join(os.path.dirname(__file__), csv_file_dir), mode='r') as csvfile:
+            reader = csv.DictReader(csvfile)
+
+            for row in reader:
+                self.tweets.append(row['Tweets'])
+                self.labels.append(torch.tensor(int(self.label_dict[row['Decision']]), dtype=torch.long))
+
+        assert len(self.tweets) == len(self.labels)
+        self.n_classes = torch.numel(torch.unique(torch.tensor(self.labels)))
+        self.task_name = csv_file_dir.split("/")[-1]
+
+    def __len__(self):
+        return len(self.tweets)
+
+    def __getitem__(self, idx):
+        return self.tweets[idx], self.labels[idx]
+
+class FountaDataset(Dataset):
+    def __init__(self, csv_file_dir: str="./raw_datasets/fountaCombined.csv"):
+        self.tweets = []
+        self.labels = []
+
+        self.label_dict = {
+            'normal': 0, 
+            'abusive': 1,
+            'spam': 2,
+            'hateful': 3
+        }
+        
+        with open(os.path.join(os.path.dirname(__file__), csv_file_dir), mode='r', encoding="utf8") as csvfile:
+            reader = csv.reader(csvfile)
+            
+            for row in reader:
+                s = ' '
+                data = s.join(row)
+                data_split = re.split(r'\t+', data)
+                
+                tweet = data_split[0]
+                label = data_split[1]
+    
+                self.tweets.append(tweet)
+                self.labels.append(torch.tensor(int(self.label_dict[label]), dtype=torch.long))
+
+        assert len(self.tweets) == len(self.labels)
+        self.n_classes = torch.numel(torch.unique(torch.tensor(self.labels)))
+        self.task_name = csv_file_dir.split("/")[-1]
+
+    def __len__(self):
+        return len(self.tweets)
+
+    def __getitem__(self, idx):
+        return self.tweets[idx], self.labels[idx]
+            
+class BalancedSampler(Sampler):
+    """
+    Sample from dataset in a balanced manner. No guarantee all the samples are seen during training.
+    """
+    def __init__(self, labels):
+        self.labels = labels
+        self.num_classes = torch.numel(torch.unique(torch.stack(self.labels)))
+
+        self.class_indices = []
+        for i in range(self.num_classes):
+            lst = torch.unbind(torch.nonzero(torch.stack(self.labels) == i).squeeze(-1))
+            lst = [i.item() for i in lst]
+            self.class_indices.append(lst)
+            
+        self.counts = [0] * self.num_classes
+        self.current_class = 0
+
+    def __iter__(self):
+        self.count = 0
+        return self
+
+    def __next__(self):
+        if self.count >= len(self.labels):
+            raise StopIteration
+        self.count += 1
+        return self.sample()
+
+    def sample(self):
+        chosen_class = self.get_class()
+        class_indices = self.class_indices[chosen_class]
+        chosen_index = np.random.choice(class_indices)
+        self.counts[chosen_class] += 1
+        return chosen_index
+
+    def get_class(self):
+        min_count = self.counts[0]
+        min_classes = [0]
+        for i in range(1, self.num_classes):
+            if self.counts[i] < min_count:
+                min_count = self.counts[i]
+                min_classes = [i]
+            if self.counts[i] == min_count:
+                min_classes.append(i)
+        chosen_class = np.random.choice(min_classes)
+        return chosen_class
+
+    def __len__(self):
+        return len(self.labels)
 
 
 ALL_DATASETS = {
