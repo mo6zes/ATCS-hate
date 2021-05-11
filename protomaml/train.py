@@ -9,14 +9,6 @@ from .utils import generate_tasks
 from .data_utils import create_metaloader
 from data.datasets import DataTwitterDavidson
 
-
-class LogCallback(pl.Callback):
-    def __init__(self):
-        super().__init__()
-
-    def on_epoch_end(self, trainer, pl_module):
-        for name, params in pl_module.named_parameters():
-            trainer.logger.experiment.add_histogram(name, params, trainer.current_epoch)
             
 class PrintCallback(pl.Callback):
     def __init__(self):
@@ -31,10 +23,10 @@ def train(args):
     os.makedirs(args.log_dir, exist_ok=True)
     
     # create logger
-    wandb_logger = WandbLogger(project='protomaml', entity='atcs-project', tags=['meta-learning', 'protomaml'], version=0, save_dir=args.log_dir, group="ProtoMAML")
+#     wandb_logger = WandbLogger(project='protomaml', entity='atcs-project', tags=['meta-learning', 'protomaml'], version=0, save_dir=args.log_dir, log_model=True, group="ProtoMAML")
     
     # create dataloaders
-    tasks = generate_tasks(args)
+    tasks = generate_tasks(args, dataset_list=[DataTwitterDavidson()])
     print(f"Training using {len(tasks)} tasks.")
     meta_loader = create_metaloader(tasks, batch_size=args.meta_batch_size, shuffle=True)
 
@@ -44,7 +36,6 @@ def train(args):
                                       save_last=True, filename='{epoch}-{train_query_loss:.3f}-{train_query_acc:.3f}')
     callbacks.append(modelcheckpoint)
     callbacks.append(LearningRateMonitor())
-    callbacks.append(LogCallback())
     callbacks.append(EarlyStopping(monitor='train_query_acc', mode='max', patience=8))
     if not args.progress_bar:
         callbacks.append(PrintCallback())
@@ -66,8 +57,7 @@ def train(args):
                          gradient_clip_val=args.grad_clip,
                          benchmark=True if args.benchmark else False,
                          plugins=args.plugins,
-                         profiler=args.profiler if args.profiler else None,
-                         logger=wandb_logger)
+                         profiler=args.profiler if args.profiler else None)
     trainer.logger._default_hp_metric = None
     trainer.logger._log_graph = False
     

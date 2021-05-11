@@ -51,61 +51,77 @@ def prepare_batch(batch, tokenizer=create_tokenizer()):
     return (texts['input_ids'], texts['attention_mask']), labels
 
 
-def create_dataloader(dataset, batch_size=1, shuffle=False, num_workers=0,
-                      collate_fn=prepare_batch, pin_memory=False):
+def create_dataloader(dataset, batch_size=1, shuffle=None, num_workers=0,
+                      collate_fn=prepare_batch, pin_memory=False, sampler=None):
     """Create a dataloader given a dataset. Small wrapper"""
     return DataLoader(dataset,
                       batch_size=batch_size,
                       shuffle=shuffle,
                       num_workers=num_workers,
                       collate_fn=collate_fn,
-                      pin_memory=pin_memory)
-
+                      pin_memory=pin_memory,
+                      sampler=sampler)
 
 def generate_tasks_from_dataset(dataset, num_tasks=None, support_examples=100,
-                                query_examples=10, **kwargs):
+                                query_examples=10, sampler=None, **kwargs):
     """Slice in a dataset to return a list of Tasks."""
-    # TODO I believe that in the meta dataset paper they had some rules on the number of sample in the support and query
-    # for example that at least 1 of each class must be represented in the support, we might have to look into that
-
-    interval = len(dataset) // (support_examples*kwargs['batch_size'] + query_examples*kwargs['batch_size'])
-    if num_tasks and interval > num_tasks:
-        interval = num_tasks
-    elif num_tasks and interval < num_tasks:
-        print(f"{num_tasks} tasks is to high, using {interval} tasks instead.")
     tasks = []
-    for i in range(interval):
-        start = i*(support_examples*kwargs['batch_size'] + query_examples*kwargs['batch_size'])
-        support = Subset(dataset, range(start, start+(support_examples * kwargs['batch_size'])))
-        start += support_examples*kwargs['batch_size']
-        query = Subset(dataset, range(start, start+(query_examples*kwargs['batch_size'])))
+
+    support_examples *= kwargs['batch_size']
+    query_examples *= kwargs['batch_size']
+    interval = len(dataset) // (support_examples + query_examples)
+    example_ratio = support_examples / (support_examples + query_examples)
+    
+    bucket_support_indices = [[] for _ in range(dataset.n_classes)]
+    bucket_query_indices = [[] for _ in range(dataset.n_classes)]
+    for i in range(dataset.n_classes):
+        lst = torch.unbind(torch.nonzero(torch.stack(dataset.labels) == i).squeeze(-1))
+        lst = [i.item() for i in lst]
+        ratio = len(lst) // interval
+        for j in range(interval):
+            start = int(ratio * j)
+            middle = int(ratio * (j + example_ratio))
+            end = int(ratio * (j + 1))
+            bucket_support_indices[i].append(lst[start:middle])
+            bucket_query_indices[i].append(lst[middle:end])
+        if len(lst) != end:
+            middle = int(end + ((len(lst) - end)*example_ratio))
+            bucket_support_indices[i].append(lst[end:middle])
+            bucket_query_indices[i].append(lst[middle:len(lst)])
+
+    for j in range(len(bucket_support_indices[0])):
+        support_indices = []
+        query_indices = []
+        for i in range(dataset.n_classes):
+            support_indices.extend(bucket_support_indices[i][j])
+            query_indices.extend(bucket_query_indices[i][j])
+
+        support_set = Subset(dataset, support_indices)
+        query_set = Subset(dataset, query_indices)
+        
+        if sampler:
+            support_loader = create_dataloader(support_set,
+                                               batch_size=kwargs['batch_size'],
+                                               num_workers=kwargs['num_workers'],
+                                               sampler=sampler([dataset.labels[i] for i in support_indices]))
+            query_loader = create_dataloader(query_set,
+                                             batch_size=kwargs['batch_size'],
+                                             num_workers=kwargs['num_workers'],
+                                             sampler=sampler([dataset.labels[i] for i in query_indices]))
+        else:
+            support_loader = create_dataloader(support_set,
+                                               batch_size=kwargs['batch_size'],
+                                               shuffle=kwargs['shuffle'],
+                                               num_workers=kwargs['num_workers'])
+            query_loader = create_dataloader(query_set,
+                                             batch_size=kwargs['batch_size'],
+                                             shuffle=kwargs['shuffle'],
+                                             num_workers=kwargs['num_workers'])
+            
         task = Task(task_name = dataset.task_name,
-                    support_loader = create_dataloader(support, batch_size=kwargs['batch_size'],
-                                                       shuffle=kwargs['shuffle'],
-                                                       num_workers=kwargs['num_workers']),
-                    query_loader = create_dataloader(query, batch_size=kwargs['batch_size'],
-                                                       shuffle=kwargs['shuffle'],
-                                                       num_workers=kwargs['num_workers']),
+                    support_loader = support_loader,
+                    query_loader = query_loader,
                     task_id = i,
                     n_classes = dataset.n_classes)
         tasks.append(task)
-        
-    # deal with rest.
-    if (num_tasks is None) or (num_tasks and len(tasks) < num_tasks):
-        task_ratio = 0.8
-        start = interval*(support_examples*kwargs['batch_size'] + query_examples*kwargs['batch_size'])
-        support = Subset(dataset, range(start, start+int((len(dataset)-start)*task_ratio)))
-        start += int((len(dataset)-start)*task_ratio)
-        query = Subset(dataset, range(start, len(dataset)))
-        task = Task(task_name = dataset.task_name,
-                    support_loader = create_dataloader(support, batch_size=kwargs['batch_size'],
-                                                       shuffle=kwargs['shuffle'],
-                                                       num_workers=kwargs['num_workers']),
-                    query_loader = create_dataloader(query, batch_size=kwargs['batch_size'],
-                                                       shuffle=kwargs['shuffle'],
-                                                       num_workers=kwargs['num_workers']),
-                    task_id = interval+1,
-                    n_classes = dataset.n_classes)
-        tasks.append(task)
-    
     return tasks
