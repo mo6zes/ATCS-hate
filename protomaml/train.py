@@ -2,6 +2,7 @@ import os
 import argparse
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor, EarlyStopping
+from pytorch_lightning.loggers import WandbLogger
 from protomaml.protomaml import ProtoMAML
 
 from .utils import generate_tasks
@@ -28,6 +29,9 @@ def train(args):
     # os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
     pl.seed_everything(args.seed)
     os.makedirs(args.log_dir, exist_ok=True)
+    
+    # create logger
+    wandb_logger = WandbLogger(project='protomaml', entity='atcs-project', tags=['meta-learning', 'protomaml'], version=0, save_dir=args.log_dir, group="ProtoMAML")
     
     # create dataloaders
     tasks = generate_tasks(args)
@@ -62,7 +66,8 @@ def train(args):
                          gradient_clip_val=args.grad_clip,
                          benchmark=True if args.benchmark else False,
                          plugins=args.plugins,
-                         profiler=args.profiler if args.profiler else None)
+                         profiler=args.profiler if args.profiler else None,
+                         logger=wandb_logger)
     trainer.logger._default_hp_metric = None
     trainer.logger._log_graph = False
     

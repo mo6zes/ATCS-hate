@@ -15,7 +15,7 @@ class ProtoMAML(pl.LightningModule):
         self.automatic_optimization=False
         
         self.model = BERT(model, hidden_size=hidden_size, output_size=output_size)
-#         self.model.unfreeze_module(nn.LayerNorm)
+        # self.model.unfreeze_module(nn.LayerNorm)
         self.model.train()
         
         # protolayer weight and bias
