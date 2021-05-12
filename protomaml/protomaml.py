@@ -6,8 +6,13 @@ import transformers
 import pytorch_lightning as pl
 import torchmetrics.functional as f
 from copy import deepcopy
+from collections import defaultdict
 
 from models.BERT import BERT
+from .utils import step
+
+higher.optim.DifferentiableOptimizer.step = step
+
 
 class ProtoMAML(pl.LightningModule):
     def __init__(self, model='bert-base-uncased', hidden_size=512, output_size=512, gradient_checkpointing=False, inner_updates=100, lr=1e-2, weight_decay=0, **kwargs):
@@ -24,6 +29,9 @@ class ProtoMAML(pl.LightningModule):
         self.bias = 0
         self.output_lr = 1e-2
         
+        # metric logging
+        self.log_dict = defaultdict(lambda: defaultdict(list))
+        
     def feature_forward(self, x):
         return self.model(x)
     
@@ -32,15 +40,13 @@ class ProtoMAML(pl.LightningModule):
         x = self.protolayer(x)
         return x
 
-    def training_step(self, batch, batch_indx):
-        # keep track of the loss and accuracy (for logging)
-        support_loss_list = []
-        support_acc_list = []
-        support_f1_list = []
-        query_loss_list = []
-        query_acc_list = []
-        query_f1_list = []
+    def training_step(self, batch, batch_indx, alt=False):
+        if not alt:
+            loss = self.default_step(batch, batch_indx)
+        else:
+            loss = self.alt_step(batch, batch_indx)
         
+    def default_step(self, batch, batch_indx):
         # get the optimizer
         opt = self.optimizers()
         
@@ -56,7 +62,7 @@ class ProtoMAML(pl.LightningModule):
             # perform the inner loops
             # clone the model and create a differentiable optimizer
             # higher creates a differentiable inner loop for us
-            with higher.innerloop_ctx(self.model, opt.optimizer, copy_initial_weights=False, track_higher_grads=True) as (fmodel, diffopt):
+            with higher.innerloop_ctx(self.model, opt.optimizer, copy_initial_weights=False, track_higher_grads=False) as (fmodel, diffopt):
                 # ensure that our model is trainable and reset the gradients.
                 self.train()
                 fmodel.train()
@@ -75,11 +81,9 @@ class ProtoMAML(pl.LightningModule):
                     self.weight = self.weight - self.output_lr * weight_grad
                     self.bias = self.bias - self.output_lr * bias_grad
                     
-                    diffopt.step(support_loss)
+                    diffopt.step(support_loss, retain_graph=True)
                     
-                    support_loss_list.append(support_loss.detach())
-                    support_acc_list.append(f.accuracy(F.softmax(pred_y.detach(), dim=-1), batch_y.detach()))
-                    support_f1_list.append(f.f1(F.softmax(pred_y.detach(), dim=-1), batch_y.detach()))
+                    self.calc_metrics(pred_y, batch_y, task.n_classes, mode='support')
 
                 # subsitute the orgininal prototypes back in the grad graph.
                 # this might be unnesesairy, but i'm unsure
@@ -96,9 +100,7 @@ class ProtoMAML(pl.LightningModule):
                     batch_y = batch_y.to(self.device)
                     pred_y = self.protolayer(fmodel(batch_x), weight, bias)
                     query_loss = F.cross_entropy(pred_y, batch_y)
-                    query_loss_list.append(query_loss.detach())
-                    query_acc_list.append(f.accuracy(F.softmax(pred_y.detach(), dim=-1), batch_y.detach()))
-                    query_f1_list.append(f.f1(F.softmax(pred_y.detach(), dim=-1), batch_y.detach()))
+                    self.calc_metrics(pred_y, batch_y, task.n_classes, mode='query')
                     
                     # calculate the gradients
                     # set create_graph=True for higher order derivatives
@@ -111,39 +113,22 @@ class ProtoMAML(pl.LightningModule):
                     # save the gradients in the model
                     for param, grad, meta_grad in zip(filter(lambda p: p.requires_grad, self.model.parameters()), grads, meta_grads):
                         if param.grad is not None:
-                            param.grad += grad.detach() + meta_grad.detach()
+                            param.grad += grad + meta_grad
                         else:
-                            param.grad = grad.detach() + meta_grad.detach()
+                            param.grad = grad + meta_grad
         
         # update the original model parameters and reset the gradients
         opt.step()
         self.zero_grad(self.model)
-
-        # calculate the loss 
-        support_loss = torch.stack(support_loss_list).mean()
-        query_loss = torch.stack(query_loss_list).mean()
         
-        # calculate accuracy
-        support_acc = torch.stack(support_acc_list).mean()
-        query_acc = torch.stack(query_acc_list).mean()
+        metrics = self.reduce_metrics('train')
         
-        # f1
-        support_f1 = torch.stack(support_f1_list).mean()
-        query_f1 = torch.stack(query_f1_list).mean()
-
-        # log the loss
-        self.log("train_support_loss", support_loss, on_step=False, on_epoch=True)
-        self.log("train_query_loss", query_loss, on_step=False, on_epoch=True)
-        self.log("train_support_acc", support_acc, on_step=False, on_epoch=True)
-        self.log("train_query_acc", query_acc, on_step=False, on_epoch=True)
-        self.log("train_support_f1", support_f1, on_step=False, on_epoch=True)
-        self.log("train_query_f1", query_f1, on_step=False, on_epoch=True)
+        self.log("q_acc", metrics[0], on_step=True, on_epoch=False, logger=False, prog_bar=True)
+        self.log("q_loss", metrics[1], on_step=True, on_epoch=False, logger=False, prog_bar=True)
+        self.log("s_acc", metrics[2], on_step=True, on_epoch=False, logger=False, prog_bar=True)
+        self.log("s_loss", metrics[3], on_step=True, on_epoch=False, logger=False, prog_bar=True)
         
-        # Log to progress bar
-        self.log("s_loss", support_loss, on_step=True, on_epoch=False, logger=False, prog_bar=True)
-        self.log("s_acc", support_acc, on_step=True, on_epoch=False, logger=False, prog_bar=True)
-        self.log("q_loss", query_loss, on_step=True, on_epoch=False, logger=False, prog_bar=True)
-        self.log("q_acc", query_acc, on_step=True, on_epoch=False, logger=False, prog_bar=True)
+        return metrics[1]
     
     def configure_optimizers(self):
         optimizer = torch.optim.Adam([{'params': filter(lambda p: p.requires_grad, self.model.bert.base_model.parameters())},
@@ -187,6 +172,127 @@ class ProtoMAML(pl.LightningModule):
     def zero_grad(self, module):
         for param in filter(lambda p: p.requires_grad, module.parameters()):
             param.grad = None
+            
+    def calc_metrics(self, pred_y, batch_y, num_classes, mode='support'):
+        self.log_dict[mode]['loss'].append(F.cross_entropy(pred_y, batch_y))
+        self.log_dict[mode]['acc'].append(f.accuracy(F.softmax(pred_y.detach(), dim=-1), batch_y.detach()))
+        self.log_dict[mode]['f1'].append(f.f1(F.softmax(pred_y.detach(), dim=-1), batch_y.detach(), num_classes=num_classes))
+        
+    def reduce_metrics(self, state='train', prog_bar_metrics=['loss', 'acc']):
+        metrics = []
+        for mode in self.log_dict.keys():
+            for metric in self.log_dict[mode].keys():
+                mean_m = torch.stack(self.log_dict[mode][metric]).mean()
+                if metric in prog_bar_metrics:
+                    metrics.append(mean_m)
+                self.log(f"{'_'.join([state, mode, metric])}", mean_m, on_step=False, on_epoch=True)
+        self.log_dict = defaultdict(lambda: defaultdict(list))
+        return metrics
+            
+    def alt_step(self, batch, batch_indx):
+        # get the optimizer
+        opt = self.optimizers()
+        
+        # loop over sampled tasks
+        for task in batch:
+            # get the support and query dataloader
+            support_loader = task.support_loader
+            query_loader = task.query_loader
+            
+            model_e = deepcopy(self.model)
+            
+            # create prototype layer
+            weight, bias = self.calculate_prototypes(support_loader, task.n_classes)
+            
+            e_opt = torch.optim.Adam([{'params': filter(lambda p: p.requires_grad, model_e.bert.base_model.parameters())},
+                                      {'params': filter(lambda p: p.requires_grad, model_e.mlp.parameters()), 'lr': self.hparams.lr*10},
+                                      {'params': [self.weight, self.bias], 'lr': self.hparams.lr*10}],
+                                      lr=self.hparams.lr, weight_decay=self.hparams.weight_decay)
+            
+            # ensure that our model is trainable and reset the gradients.
+            self.train()
+            model_e.train()
+            self.zero_grad(model_e)
+
+            # perform task adaptation for k inner steps
+            data_iter = iter(support_loader)
+            for i in range(min(self.hparams.inner_updates, len(support_loader))):
+                batch_x, batch_y = next(data_iter)
+                batch_x = [i.to(self.device) for i in batch_x]
+                batch_y = batch_y.to(self.device)
+                
+                pred_y = self.protolayer(model_e(batch_x), weight, bias)
+                support_loss = F.cross_entropy(pred_y, batch_y)
+                                           
+                weight_grad, bias_grad = torch.autograd.grad(support_loss, [self.weight, self.bias], retain_graph=True)
+                if self.weight.grad is not None:
+                    self.weight.grad += weight_grad
+                else:
+                    self.weight.grad = weight_grad
+                if self.bias.grad is not None:
+                    self.bias.grad += bias_grad
+                else:
+                    self.bias.grad = bias_grad
+
+                grads = torch.autograd.grad(support_loss, filter(lambda p: p.requires_grad, model_e.parameters()), retain_graph=False)
+                for param, grad in zip(filter(lambda p: p.requires_grad, model_e.parameters()), grads):
+                    if param.grad is not None:
+                        param.grad += grad
+                    else:
+                        param.grad = grad
+                
+                e_opt.step()
+                self.zero_grad(model_e)
+                self.weight.grad = None
+                self.bias.grad = None
+
+                self.calc_metrics(pred_y, batch_y, task.n_classes, mode='support')
+
+            # subsitute the orgininal prototypes back in the grad graph.
+            # this might be unnesesairy, but i'm unsure
+            self.weight = torch.zeros_like(weight, requires_grad=True) + (self.weight - torch.zeros_like(weight, requires_grad=True)).detach()
+            self.bias = torch.zeros_like(bias, requires_grad=True) + (self.bias - torch.zeros_like(bias, requires_grad=True)).detach()
+
+            # abtain the gradient on the query set
+            for module in model_e.modules():
+                if isinstance(module, nn.Dropout):
+                    module.eval()
+
+            for batch_x, batch_y in query_loader:
+                batch_x = [i.to(self.device) for i in batch_x]
+                batch_y = batch_y.to(self.device)
+                pred_y = self.protolayer(model_e(batch_x), weight, bias)
+                query_loss = F.cross_entropy(pred_y, batch_y)
+                
+                self.calc_metrics(pred_y, batch_y, task.n_classes, mode='query')
+
+                # calculate the gradients
+                # set create_graph=True for higher order derivatives
+                grads = torch.autograd.grad(query_loss, filter(lambda p: p.requires_grad, model_e.parameters()), retain_graph=True)
+                meta_grads = torch.autograd.grad(query_loss, filter(lambda p: p.requires_grad, self.model.parameters()), retain_graph=True)
+
+#                     torch.nn.utils.clip_grad_norm_(filter(lambda p: p.requires_grad, fmodel.parameters()), self.hparams.grad_clip)
+#                     torch.nn.utils.clip_grad_norm_(filter(lambda p: p.requires_grad, self.model.parameters()), self.hparams.grad_clip)
+
+                # save the gradients in the model
+                for param, grad, meta_grad in zip(filter(lambda p: p.requires_grad, self.model.parameters()), grads, meta_grads):
+                    if param.grad is not None:
+                        param.grad += grad + meta_grad
+                    else:
+                        param.grad = grad + meta_grad
+        
+        # update the original model parameters and reset the gradients
+        opt.step()
+        self.zero_grad(self.model)
+
+        metrics = self.reduce_metrics('train')
+        
+        self.log("q_acc", metrics[0], on_step=True, on_epoch=False, logger=False, prog_bar=True)
+        self.log("q_loss", metrics[1], on_step=True, on_epoch=False, logger=False, prog_bar=True)
+        self.log("s_acc", metrics[2], on_step=True, on_epoch=False, logger=False, prog_bar=True)
+        self.log("s_loss", metrics[3], on_step=True, on_epoch=False, logger=False, prog_bar=True)
+        
+        return metrics[1]
         
     @staticmethod
     def add_model_specific_args(parent_parser):
@@ -208,4 +314,10 @@ class ProtoMAML(pl.LightningModule):
         parser.add_argument('--weight_decay', default=1e-6, type=float,
                             help='Weight decay.')
         
+        parser.add_argument('--alt_step', action='store_true',
+                            help='Whether to use the alternate formulation.')
+        parser.add_argument('--gradient_checkpointing', action='store_true',
+                            help='Whether to use the gradient checkpointing. Reduces memory usage.')
+        
         return parent_parser
+        

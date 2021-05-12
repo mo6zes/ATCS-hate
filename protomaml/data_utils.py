@@ -77,13 +77,16 @@ def generate_tasks_from_dataset(dataset, num_tasks=None, support_examples=100,
     for i in range(dataset.n_classes):
         lst = torch.unbind(torch.nonzero(torch.stack(dataset.labels) == i).squeeze(-1))
         lst = [i.item() for i in lst]
-        ratio = len(lst) // interval
-        for j in range(interval):
-            start = int(ratio * j)
-            middle = int(ratio * (j + example_ratio))
-            end = int(ratio * (j + 1))
-            bucket_support_indices[i].append(lst[start:middle])
-            bucket_query_indices[i].append(lst[middle:end])
+        if interval > 0:
+            ratio = len(lst) // interval
+            for j in range(interval):
+                start = int(ratio * j)
+                middle = int(ratio * (j + example_ratio))
+                end = int(ratio * (j + 1))
+                bucket_support_indices[i].append(lst[start:middle])
+                bucket_query_indices[i].append(lst[middle:end])
+        else:
+            end = 0
         if len(lst) != end:
             middle = int(end + ((len(lst) - end)*example_ratio))
             bucket_support_indices[i].append(lst[end:middle])
