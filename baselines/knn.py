@@ -1,12 +1,13 @@
 import torch.nn as nn
 import pytorch_lightning as pl
-
-
+import sklearn.metrics as mtr
 from models.BERT import BERT
 import torch
+import matplotlib.pyplot as plt
 from models.model_utils import create_pretrained_transformer
-
-
+import pandas as pd
+import seaborn as sns
+import wandb
 class KNNBaseline(pl.LightningModule):
 
     def __init__(self, similarity='euclidean', transformer_model='bert-base-uncased', hidden_size=512,
@@ -15,7 +16,7 @@ class KNNBaseline(pl.LightningModule):
         self.save_hyperparameters()
 
         self.encoder = BERT(transformer_model=transformer_model, hidden_size=hidden_size, output_size=output_size)
-        self.encoder.unfreeze_module()
+        self.encoder.unfreeze_attention_layer([5, 6, 7, 8, 9, 10, 11], pooler=True)
 
         assert clfs_spec, "Classifier specification is required."
 
@@ -25,6 +26,8 @@ class KNNBaseline(pl.LightningModule):
             assert n_classes > 1
             n_out = 1 if n_classes == 2 else n_classes
             classifiers.append(nn.Sequential(
+                nn.Linear(output_size, output_size),
+                nn.ReLU(),
                 nn.Linear(output_size, n_out)
             ))
 
@@ -39,25 +42,76 @@ class KNNBaseline(pl.LightningModule):
                                     lr=self.hparams.lr, weight_decay=self.hparams.weight_decay)
         return optimizer
 
-    def training_step(self, batch, batch_idx):
-        data, dataset_idx = batch
+    def training_step(self, batches, batch_idx):
+        losses = []
+        for dataset_idx, data in enumerate(batches):
+            # text is a tuple of (words, mask)
+            text, labels = data
+
+            x = self.forward(text, classifier_idx=dataset_idx)  # B x n_classes
+            if x.shape[-1] == 1:
+                # 2 classes
+                loss = torch.nn.functional.binary_cross_entropy_with_logits(x.squeeze(), labels.float())
+                preds = torch.round(torch.sigmoid(x).squeeze()).detach().int().cpu()
+
+            else:
+                # >2 classes
+                loss = torch.nn.functional.cross_entropy(x, labels)
+                preds = x.argmax(dim=1).detach().cpu()
+
+            accuracy = mtr.accuracy_score(labels.cpu().numpy(), preds.cpu().numpy())
+            balanced_accuracy = mtr.balanced_accuracy_score(labels.cpu().numpy(), preds.cpu().numpy())
+
+            self.log(f"train_{dataset_idx}_dataset", dataset_idx)
+            self.log(f"train_{dataset_idx}_loss", loss)
+            self.log(f"train_{dataset_idx}_acc", accuracy)
+            self.log(f"train_{dataset_idx}_bal_acc", balanced_accuracy)
+
+            losses.append(loss)
+        total_loss = sum(losses)
+        self.log(f"train_total_loss", total_loss)
+        return total_loss
+
+    def validation_step(self, data, batch_idx, dataset_idx=None):
         # text is a tuple of (words, mask)
+        if dataset_idx is None:
+            dataset_idx=0
+
         text, labels = data
 
         x = self.forward(text, classifier_idx=dataset_idx)  # B x n_classes
 
         if x.shape[-1] == 1:
+            # 2 classes
             loss = torch.nn.functional.binary_cross_entropy_with_logits(x.squeeze(), labels.float())
-            accuracy = (labels == torch.round(x.squeeze()).detach().int()).sum() / labels.size(0)
+            preds = torch.round(torch.sigmoid(x).squeeze()).detach().int().cpu()
+
         else:
+            # >2 classes
             loss = torch.nn.functional.cross_entropy(x, labels)
-            accuracy = (labels == x.argmax(dim=1)).sum() / labels.size(0)
+            preds = x.argmax(dim=1).detach().cpu()
 
-        self.log("train_dataset", dataset_idx)
-        self.log("train_loss", loss)
-        self.log("train_acc", accuracy)
+        accuracy = mtr.accuracy_score(labels.cpu().numpy(), preds.cpu().numpy())
+        balanced_accuracy = mtr.balanced_accuracy_score(labels.cpu().numpy(), preds.cpu().numpy())
 
-        return loss
+        self.log(f"val_{dataset_idx}_loss", loss)
+        self.log(f"val_{dataset_idx}_acc", accuracy)
+        self.log(f"val_{dataset_idx}_bal_acc", balanced_accuracy)
+
+        return {'loss': loss, 'preds': preds, 'labels': labels}
+
+    def validation_epoch_end(self, all_outputs):
+        if not isinstance(all_outputs[0], list):
+            all_outputs = [all_outputs]
+
+        for i, outputs in enumerate(all_outputs):
+            preds = torch.cat([tmp['preds'] for tmp in outputs])
+            labels = torch.cat([tmp['labels'] for tmp in outputs])
+
+            wandb.log({f"val_conf_mat_{i}": wandb.plot.confusion_matrix(
+                probs=None,
+                y_true=labels.cpu().numpy(),
+                preds=preds.numpy())}, commit=False)
 
     @staticmethod
     def add_model_specific_args(parent_parser):
