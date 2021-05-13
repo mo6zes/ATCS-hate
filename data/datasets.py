@@ -62,30 +62,30 @@ class DeGilbertStormFront(Dataset):
     Dataset for DeGilbert Dataset based on Storm Front forum
     """
     def __init__(self, csv_file_dir:str="./raw_datasets/deGilbertStormfront.csv"):
-        self.tweets = []
+        self.text = []
         self.labels = []
         self.label_dict = {'noHate': 0, 'hate': 1}
 
-        with open(os.path.join(os.path.dirname(__file__), csv_file_dir), mode='r') as csvfile:
+        with open(os.path.join(os.path.dirname(__file__), csv_file_dir), mode='r', encoding="utf8") as csvfile:
             reader = csv.DictReader(csvfile)
             for row in reader:
-                self.tweets.append(row['text'])
+                self.text.append(row['text'])
                 self.labels.append(torch.tensor(int(self.label_dict[row['label']]), dtype=torch.long))
 
-        assert len(self.tweets) == len(self.labels)
+        assert len(self.text) == len(self.labels)
         self.n_classes = torch.numel(torch.unique(torch.tensor(self.labels)))
         self.task_name = csv_file_dir.split("/")[-1]
 
     def __len__(self):
-        return len(self.tweets)
+        return len(self.text)
 
     def __getitem__(self, idx):
-        return self.tweets[idx], self.labels[idx]
+        return self.text[idx], self.labels[idx]
 
     @staticmethod
     def create_data_csv_file(csv_annotations_dir='../data/deGilbert/annotations_metadata.csv'):
 
-        with open(csv_annotations_dir, mode='r') as csvfile:
+        with open(csv_annotations_dir, mode='r', encoding="utf8") as csvfile:
             reader = csv.DictReader(csvfile)
             data = []
 
@@ -113,7 +113,7 @@ class QuianData(Dataset):
     """
     def __init__(self, csv_file_dir: str="./raw_datasets/gabQuian.csv", raw_csv_file_dir: str=None,
                  save_new_csv_dir: str=None):
-        self.tweets = []
+        self.text = []
         self.labels = []
 
         self.label_dict = {'noHate': 0, 'hate': 1}
@@ -126,18 +126,18 @@ class QuianData(Dataset):
         with open(os.path.join(os.path.dirname(__file__), csv_file_dir), mode='r', encoding="utf8") as csvfile:
             reader = csv.DictReader(csvfile)
             for row in reader:
-                self.tweets.append(row['text'])
+                self.text.append(row['text'])
                 self.labels.append(torch.tensor(int(self.label_dict[row['label']]), dtype=torch.long))
 
-        assert len(self.tweets) == len(self.labels)
+        assert len(self.text) == len(self.labels)
         self.n_classes = torch.numel(torch.unique(torch.tensor(self.labels)))
         self.task_name = csv_file_dir.split("/")[-1]
 
     def __len__(self):
-        return len(self.tweets)
+        return len(self.text)
 
     def __getitem__(self, idx):
-        return self.tweets[idx], self.labels[idx]
+        return self.text[idx], self.labels[idx]
 
     def create_data_csv_file(self):
         with open(self.raw_csv, mode='r', encoding="utf8") as csvfile:
@@ -179,7 +179,7 @@ class QuianData(Dataset):
             
 class RezvanHarrassment(Dataset):
     def __init__(self, csv_file_dir: str="./raw_datasets/rezvanData.csv"):
-        self.tweets = []
+        self.text = []
         self.labels = []
 
         self.label_dict = {
@@ -194,22 +194,22 @@ class RezvanHarrassment(Dataset):
             reader = csv.DictReader(csvfile)
 
             for row in reader:
-                self.tweets.append(row['Tweets'])
+                self.text.append(row['Tweets'])
                 self.labels.append(torch.tensor(int(self.label_dict[row['Decision']]), dtype=torch.long))
 
-        assert len(self.tweets) == len(self.labels)
+        assert len(self.text) == len(self.labels)
         self.n_classes = torch.numel(torch.unique(torch.tensor(self.labels)))
         self.task_name = csv_file_dir.split("/")[-1]
 
     def __len__(self):
-        return len(self.tweets)
+        return len(self.text)
 
     def __getitem__(self, idx):
-        return self.tweets[idx], self.labels[idx]
+        return self.text[idx], self.labels[idx]
 
 class FountaDataset(Dataset):
     def __init__(self, csv_file_dir: str="./raw_datasets/fountaCombined.csv"):
-        self.tweets = []
+        self.text = []
         self.labels = []
 
         self.label_dict = {
@@ -230,23 +230,23 @@ class FountaDataset(Dataset):
                 tweet = data_split[0]
                 label = data_split[1]
     
-                self.tweets.append(tweet)
+                self.text.append(tweet)
                 self.labels.append(torch.tensor(int(self.label_dict[label]), dtype=torch.long))
 
-        assert len(self.tweets) == len(self.labels)
+        assert len(self.text) == len(self.labels)
         self.n_classes = torch.numel(torch.unique(torch.tensor(self.labels)))
         self.task_name = csv_file_dir.split("/")[-1]
 
     def __len__(self):
-        return len(self.tweets)
+        return len(self.text)
 
     def __getitem__(self, idx):
-        return self.tweets[idx], self.labels[idx]
+        return self.text[idx], self.labels[idx]
 
 
 class TalkdownDataset(Dataset):
     def __init__(self, csv_file_dir: str="./raw_datasets/talkdownData.csv"):
-        self.tweets = []
+        self.text = []
         self.labels = []
 
         self.label_dict = {
@@ -259,23 +259,23 @@ class TalkdownDataset(Dataset):
             
             for row in reader:
                 
-                self.tweets.append(row['comment'])
+                self.text.append(row['comment'])
                 self.labels.append(torch.tensor(int(self.label_dict[row['new_label']]), dtype=torch.long))
 
-        assert len(self.tweets) == len(self.labels)
+        assert len(self.text) == len(self.labels)
         self.n_classes = torch.numel(torch.unique(torch.tensor(self.labels)))
         self.task_name = csv_file_dir.split("/")[-1]
 
     def __len__(self):
-        return len(self.tweets)
+        return len(self.text)
 
     def __getitem__(self, idx):
-        return self.tweets[idx], self.labels[idx]
+        return self.text[idx], self.labels[idx]
 
 
 class WikipediaDataset(Dataset):
     def __init__(self, csv_file_dir: str="./raw_datasets/wikipediaAgressionCombined.csv"):
-        self.tweets = []
+        self.text = []
         self.labels = []
 
         # aggresion of 0 means not agressive, aggression of 1 means aggressive
@@ -285,18 +285,18 @@ class WikipediaDataset(Dataset):
             
             for row in reader:
                 
-                self.tweets.append(row['comment'])
+                self.text.append(row['comment'])
                 self.labels.append(torch.tensor(int(row['aggression']), dtype=torch.long))
 
-        assert len(self.tweets) == len(self.labels)
+        assert len(self.text) == len(self.labels)
         self.n_classes = torch.numel(torch.unique(torch.tensor(self.labels)))
         self.task_name = csv_file_dir.split("/")[-1]
 
     def __len__(self):
-        return len(self.tweets)
+        return len(self.text)
 
     def __getitem__(self, idx):
-        return self.tweets[idx], self.labels[idx]
+        return self.text[idx], self.labels[idx]
 
 
 class BalancedSampler(Sampler):

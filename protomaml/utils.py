@@ -1,10 +1,11 @@
 import torch
 from .data_utils import generate_tasks_from_dataset
-from data.datasets import DataTwitterDavidson, DataFoxNews, DeGilbertStormFront, QuianData, RezvanHarrassment, FountaDataset, BalancedSampler
+from data.datasets import DataTwitterDavidson, DataFoxNews, DeGilbertStormFront, QuianData, RezvanHarrassment, FountaDataset, TalkdownDataset, WikipediaDataset, BalancedSampler
 
-def generate_tasks(args, dataset_list=[DataTwitterDavidson(), DataFoxNews(),
+def generate_tasks(args, dataset_list=[DataTwitterDavidson(), DataFoxNews(), DeGilbertStormFront(),
                                        QuianData(), QuianData("./raw_datasets/redditQuian.csv"),
-                                       RezvanHarrassment(), FountaDataset()],
+                                       RezvanHarrassment(), FountaDataset(), TalkdownDataset(),
+                                       WikipediaDataset()],
                                        sampler=BalancedSampler):
     tasks = []
     for dataset in dataset_list:

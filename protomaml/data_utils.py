@@ -47,7 +47,7 @@ def prepare_batch(batch, tokenizer=create_tokenizer()):
         The text is also tokenized and padded automatically."""
     texts = [i[0] for i in batch]
     labels = torch.stack([i[-1] for i in batch])
-    texts = tokenizer(texts, padding=True, truncation=True, return_tensors="pt")
+    texts = tokenizer(texts, padding=True, truncation=True, return_tensors="pt", max_length=256)
     return (texts['input_ids'], texts['attention_mask']), labels
 
 def create_dataloader(dataset, batch_size=1, shuffle=None, num_workers=0,

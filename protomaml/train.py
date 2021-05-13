@@ -21,15 +21,11 @@ class LogCallback(pl.Callback):
             trainer.logger.experiment.add_histogram(name, params, trainer.current_epoch)
             
 class MemoryCallback(pl.Callback):
-    def __init__(self, mem_diff=2000000000):
+    def __init__(self):
         super().__init__()
-        self.mem_diff = mem_diff
 
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx):
-        gpu_max_mem = torch.cuda.get_device_properties(device=pl_module.device).total_memory
-        gpu_cur_mem = torch.cuda.memory_reserved(device=pl_module.device)
-        if (gpu_max_mem - gpu_cur_mem) < self.mem_diff:
-            torch.cuda.empty_cache()  
+        torch.cuda.empty_cache()  
             
 class PrintCallback(pl.Callback):
     def __init__(self):
