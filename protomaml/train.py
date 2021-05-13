@@ -21,14 +21,14 @@ class LogCallback(pl.Callback):
             trainer.logger.experiment.add_histogram(name, params, trainer.current_epoch)
             
 class MemoryCallback(pl.Callback):
-    def __init__(self):
-        super().__init__(mem_diff=2000000000)
+    def __init__(self, mem_diff=2000000000):
+        super().__init__()
         self.mem_diff = mem_diff
 
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx):
         gpu_max_mem = torch.cuda.get_device_properties(device=pl_module.device).total_memory
         gpu_cur_mem = torch.cuda.memory_reserved(device=pl_module.device)
-        if gpu_max_mem - gpu_cur_mem < self.mem_diff:
+        if (gpu_max_mem - gpu_cur_mem) < self.mem_diff:
             torch.cuda.empty_cache()  
             
 class PrintCallback(pl.Callback):
@@ -44,7 +44,7 @@ def train(args):
 #     os.makedirs(args.log_dir, exist_ok=True)
     
     # create logger
-#     wandb_logger = WandbLogger(project='protomaml', entity='atcs-project', tags=['meta-learning', 'protomaml'], version=0, log_model=True, group="ProtoMAML")
+    wandb_logger = WandbLogger(project='protomaml', entity='atcs-project', tags=['meta-learning', 'protomaml'], version=0, log_model=True, group="ProtoMAML")
     
     # create dataloaders
     tasks = generate_tasks(args)
@@ -83,18 +83,19 @@ def train(args):
                          gradient_clip_val=args.grad_clip,
                          benchmark=True if args.benchmark else False,
                          plugins=args.plugins,
-                         profiler=args.profiler if args.profiler else None)
-    trainer.logger._default_hp_metric = None
-    trainer.logger._log_graph = False
+                         profiler=args.profiler if args.profiler else None,
+                         logger=wandb_logger)
+#     trainer.logger._default_hp_metric = None
+#     trainer.logger._log_graph = False
     
     # Create model
     dict_args = vars(args)
     model = ProtoMAML(**dict_args)
         
-    if not args.progress_bar:
-        print("\nThe progress bar has been surpressed. For updates on the training progress, " + \
-              "check the TensorBoard file at " + trainer.logger.log_dir + ". If you " + \
-              "want to see the progress bar, use the argparse option \"progress_bar\".\n")
+#     if not args.progress_bar:
+#         print("\nThe progress bar has been surpressed. For updates on the training progress, " + \
+#               "check the TensorBoard file at " + trainer.logger.log_dir + ". If you " + \
+#               "want to see the progress bar, use the argparse option \"progress_bar\".\n")
 
     # Training
     # with torch.autograd.set_detect_anomaly(True):
