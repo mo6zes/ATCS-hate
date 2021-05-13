@@ -7,7 +7,6 @@ import re
 from string import punctuation
 from torch.utils.data import Dataset, DataLoader, Sampler
 
-
 class DataTwitterDavidson(Dataset):
     """
     Dataset class for Twitter data by Davidson
@@ -243,7 +242,63 @@ class FountaDataset(Dataset):
 
     def __getitem__(self, idx):
         return self.tweets[idx], self.labels[idx]
+
+
+class TalkdownDataset(Dataset):
+    def __init__(self, csv_file_dir: str="./raw_datasets/talkdownData.csv"):
+        self.tweets = []
+        self.labels = []
+
+        self.label_dict = {
+            'condescending': 0, 
+            'nonCondescending': 1,
+        }
+        
+        with open(os.path.join(os.path.dirname(__file__), csv_file_dir, mode='r', encoding="utf8") as csvfile:
+            reader = csv.DictReader(csvfile)
             
+            for row in reader:
+                
+                self.tweets.append(row['comment'])
+                self.labels.append(torch.tensor(int(self.label_dict[row['new_label']]), dtype=torch.long))
+
+        assert len(self.tweets) == len(self.labels)
+        self.n_classes = torch.numel(torch.unique(torch.tensor(self.labels)))
+        self.task_name = csv_file_dir.split("/")[-1]
+
+    def __len__(self):
+        return len(self.tweets)
+
+    def __getitem__(self, idx):
+        return self.tweets[idx], self.labels[idx]
+
+
+class WikipediaDataset(Dataset):
+    def __init__(self, csv_file_dir: str="./raw_datasets/wikipediaAgressionCombined.csv"):
+        self.tweets = []
+        self.labels = []
+
+        # aggresion of 0 means not agressive, aggression of 1 means aggressive
+        
+        with open(os.path.join(os.path.dirname(__file__), csv_file_dir, mode='r', encoding="utf8") as csvfile:
+            reader = csv.DictReader(csvfile)
+            
+            for row in reader:
+                
+                self.tweets.append(row['comment'])
+                self.labels.append(torch.tensor(int(row['aggression']), dtype=torch.long))
+
+        assert len(self.tweets) == len(self.labels)
+        self.n_classes = torch.numel(torch.unique(torch.tensor(self.labels)))
+        self.task_name = csv_file_dir.split("/")[-1]
+
+    def __len__(self):
+        return len(self.tweets)
+
+    def __getitem__(self, idx):
+        return self.tweets[idx], self.labels[idx]
+
+
 class BalancedSampler(Sampler):
     """
     Sample from dataset in a balanced manner. No guarantee all the samples are seen during training.
@@ -294,13 +349,6 @@ class BalancedSampler(Sampler):
         return len(self.labels)
 
 
-ALL_DATASETS = {
-    'twitter_davidson': DataTwitterDavidson,
-    'fox_news': DataFoxNews,
-    'degilbert_storefront': DeGilbertStormFront,
-    'quian': QuianData
-}
-
 # if __name__ == "__main__":
-#     data_dir = './data/gabQuian.csv'
-#     dataset = DataGabQuian(data_dir)
+#     data_dir = './data/wikipediaAgressionCombined.csv'
+#     dataset = WikipediaDataset(data_dir)
