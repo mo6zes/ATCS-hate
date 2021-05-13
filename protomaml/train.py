@@ -1,5 +1,6 @@
 import os
 import argparse
+import torch
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor, EarlyStopping
 from pytorch_lightning.loggers import WandbLogger
@@ -8,6 +9,7 @@ import wandb
 
 from .utils import generate_tasks
 from .data_utils import create_metaloader
+from data.datasets import DataTwitterDavidson, RezvanHarrassment
 
 
 class LogCallback(pl.Callback):
@@ -17,6 +19,17 @@ class LogCallback(pl.Callback):
     def on_epoch_end(self, trainer, pl_module):
         for name, params in pl_module.named_parameters():
             trainer.logger.experiment.add_histogram(name, params, trainer.current_epoch)
+            
+class MemoryCallback(pl.Callback):
+    def __init__(self):
+        super().__init__(mem_diff=2000000000)
+        self.mem_diff = mem_diff
+
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx):
+        gpu_max_mem = torch.cuda.get_device_properties(device=pl_module.device).total_memory
+        gpu_cur_mem = torch.cuda.memory_reserved(device=pl_module.device)
+        if gpu_max_mem - gpu_cur_mem < self.mem_diff:
+            torch.cuda.empty_cache()  
             
 class PrintCallback(pl.Callback):
     def __init__(self):
@@ -31,7 +44,7 @@ def train(args):
 #     os.makedirs(args.log_dir, exist_ok=True)
     
     # create logger
-    wandb_logger = WandbLogger(project='protomaml', entity='atcs-project', tags=['meta-learning', 'protomaml'], version=0, log_model=True, group="ProtoMAML")
+#     wandb_logger = WandbLogger(project='protomaml', entity='atcs-project', tags=['meta-learning', 'protomaml'], version=0, log_model=True, group="ProtoMAML")
     
     # create dataloaders
     tasks = generate_tasks(args)
@@ -40,11 +53,14 @@ def train(args):
 
     # Create a PyTorch Lightning trainer
     callbacks = []
+    callbacks.append(MemoryCallback())
     modelcheckpoint = ModelCheckpoint(monitor='train_query_acc', mode='max', save_top_k=1,
                                       save_last=True, filename='{epoch}-{train_query_loss:.3f}-{train_query_acc:.3f}')
     callbacks.append(modelcheckpoint)
     callbacks.append(LearningRateMonitor())
-    if not wandb_logger:
+    try:
+        wandb_logger
+    except Exception:
         callbacks.append(LogCallback())
     callbacks.append(EarlyStopping(monitor='train_query_acc', mode='max', patience=8))
     if not args.progress_bar:
@@ -67,10 +83,9 @@ def train(args):
                          gradient_clip_val=args.grad_clip,
                          benchmark=True if args.benchmark else False,
                          plugins=args.plugins,
-                         profiler=args.profiler if args.profiler else None,
-                         logger=wandb_logger)
-#     trainer.logger._default_hp_metric = None
-#     trainer.logger._log_graph = False
+                         profiler=args.profiler if args.profiler else None)
+    trainer.logger._default_hp_metric = None
+    trainer.logger._log_graph = False
     
     # Create model
     dict_args = vars(args)
@@ -107,7 +122,7 @@ if __name__ == '__main__':
     parser.add_argument('--num_workers', default=0, type=int,
                         help='Number of workers for the tasks.')
     
-    parser.add_argument('--query_samples', default=100, type=int,
+    parser.add_argument('--query_examples', default=100, type=int,
                         help='Number of batches in the query loader.')
     
     parser.add_argument('--precision', default=32, type=int,

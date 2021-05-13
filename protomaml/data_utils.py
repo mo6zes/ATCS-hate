@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
+from numpy.random import default_rng
 from torch.utils.data import Dataset, DataLoader, Subset
 
 from models.model_utils import create_tokenizer
@@ -17,7 +19,6 @@ class Task():
         self.task_id = task_id
         self.n_classes = n_classes
 
-
 class MetaDataloader(Dataset):
     """ The metaloader is an iterator which randomly returns Tasks"""
     def __init__(self, tasks: list):
@@ -32,7 +33,6 @@ class MetaDataloader(Dataset):
 def meta_collate_fn(batch):
     """Return the input without modification."""
     return batch
-
 
 def create_metaloader(tasks, batch_size=1, shuffle=False, num_workers=0,
                       collate_fn=meta_collate_fn, pin_memory=False):
@@ -49,7 +49,6 @@ def prepare_batch(batch, tokenizer=create_tokenizer()):
     labels = torch.stack([i[-1] for i in batch])
     texts = tokenizer(texts, padding=True, truncation=True, return_tensors="pt")
     return (texts['input_ids'], texts['attention_mask']), labels
-
 
 def create_dataloader(dataset, batch_size=1, shuffle=None, num_workers=0,
                       collate_fn=prepare_batch, pin_memory=False, sampler=None):
@@ -71,34 +70,42 @@ def generate_tasks_from_dataset(dataset, num_tasks=None, support_examples=100,
     query_examples *= kwargs['batch_size']
     interval = len(dataset) // (support_examples + query_examples)
     example_ratio = support_examples / (support_examples + query_examples)
-    
-    bucket_support_indices = [[] for _ in range(dataset.n_classes)]
-    bucket_query_indices = [[] for _ in range(dataset.n_classes)]
+    rng = default_rng()
+    class_bucket = []
+    samples_per_class = []
+
     for i in range(dataset.n_classes):
         lst = torch.unbind(torch.nonzero(torch.stack(dataset.labels) == i).squeeze(-1))
         lst = [i.item() for i in lst]
-        if interval > 0:
-            ratio = len(lst) // interval
-            for j in range(interval):
-                start = int(ratio * j)
-                middle = int(ratio * (j + example_ratio))
-                end = int(ratio * (j + 1))
-                bucket_support_indices[i].append(lst[start:middle])
-                bucket_query_indices[i].append(lst[middle:end])
-        else:
-            end = 0
-        if len(lst) != end:
-            middle = int(end + ((len(lst) - end)*example_ratio))
-            bucket_support_indices[i].append(lst[end:middle])
-            bucket_query_indices[i].append(lst[middle:len(lst)])
+        class_bucket.append(lst)
+        samples_per_class.append(len(lst) // interval)
 
-    for j in range(len(bucket_support_indices[0])):
-        support_indices = []
-        query_indices = []
-        for i in range(dataset.n_classes):
-            support_indices.extend(bucket_support_indices[i][j])
-            query_indices.extend(bucket_query_indices[i][j])
+    # oversample
+    for i in range(len(class_bucket)):
+        residual = len(class_bucket[i]) - (interval * samples_per_class[i])
+        size = abs(samples_per_class[i] - residual)
+        class_samples = rng.choice(class_bucket[i], size=size, replace=False)
+        class_bucket[i].extend(class_samples)
 
+    # create sets
+    support_bucket = []
+    query_bucket = []
+    for i in range(interval+1):
+        support_set = []
+        query_set = []
+        for j in range(dataset.n_classes):
+            samples = class_bucket[j]
+            ratio = samples_per_class[j]
+            start = int(np.rint(ratio * i))
+            middle = int(np.rint(ratio * (i + example_ratio)))
+            end = int(np.rint(ratio * (i + 1)))
+            support_set.extend(samples[start:middle])
+            query_set.extend(samples[middle:end])
+        support_bucket.append(support_set)
+        query_bucket.append(query_set)
+        
+    for support_indices, query_indices in zip(support_bucket, query_bucket):
+        
         support_set = Subset(dataset, support_indices)
         query_set = Subset(dataset, query_indices)
         
