@@ -254,7 +254,7 @@ class TalkdownDataset(Dataset):
             'nonCondescending': 1,
         }
         
-        with open(os.path.join(os.path.dirname(__file__), csv_file_dir, mode='r', encoding="utf8") as csvfile:
+        with open(os.path.join(os.path.dirname(__file__), csv_file_dir), mode='r', encoding="utf8") as csvfile:
             reader = csv.DictReader(csvfile)
             
             for row in reader:
@@ -280,7 +280,7 @@ class WikipediaDataset(Dataset):
 
         # aggresion of 0 means not agressive, aggression of 1 means aggressive
         
-        with open(os.path.join(os.path.dirname(__file__), csv_file_dir, mode='r', encoding="utf8") as csvfile:
+        with open(os.path.join(os.path.dirname(__file__), csv_file_dir), mode='r', encoding="utf8") as csvfile:
             reader = csv.DictReader(csvfile)
             
             for row in reader:
