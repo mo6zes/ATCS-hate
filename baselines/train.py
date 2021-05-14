@@ -3,15 +3,13 @@ import argparse
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 import torch
-
-from data.datasets import DataFoxNews, DataTwitterDavidson
+from data.datasets import DataFoxNews, DataTwitterDavidson, ALL_DATASETS, BalancedSampler
 from data_utils import TakeTurnLoader
 from knn import KNNBaseline
 import wandb
 from pytorch_lightning.loggers import WandbLogger  # newline 1
 
 from protomaml.data_utils import create_dataloader, prepare_batch
-
 
 class LogCallback(pl.Callback):
     def __init__(self):
@@ -36,7 +34,13 @@ def train(args):
     os.makedirs(args.log_dir, exist_ok=True)
 
     # create dataloaders
-    datasets = [DataTwitterDavidson(), DataFoxNews()]
+    print("training on:")
+    datasets = []
+    for dataset in args.datasets:
+        assert dataset in ALL_DATASETS
+        print("...", dataset)
+        datasets.append(ALL_DATASETS[dataset]())
+
     #TODO random splitting might produce imbalanced classes in splits
     train_datasets = []
     val_datasets = []
@@ -58,6 +62,7 @@ def train(args):
                               batch_size=32,
                               shuffle=False,
                                 num_workers=4,
+                                  sampler=BalancedSampler(list(torch.tensor(d.dataset.labels)[d.indices])),
                               collate_fn=prepare_batch) for d in train_datasets]
     val_dls = [create_dataloader(d,
                               batch_size=32,
@@ -80,7 +85,7 @@ def train(args):
         callbacks.append(PrintCallback())
 
     wandb_logger = WandbLogger(project='hate-baseline', entity='atcs-project', config=vars(args))
-
+    # wandb.init(project='hate-baseline', entity='atcs-project', config=vars(args))
     trainer = pl.Trainer(default_root_dir=args.log_dir,
                          auto_select_gpus=torch.cuda.is_available(),
                          gpus=None if args.gpus == "None" else int(args.gpus),
@@ -102,6 +107,7 @@ def train(args):
     # Create model
     dict_args = vars(args)
     model = KNNBaseline(**dict_args, clfs_spec=[d.n_classes for d in datasets])
+    model.encoder.unfreeze_attention_layer([6, 7, 8, 9, 10, 11])
 
     if not args.progress_bar:
         print("\nThe progress bar has been surpressed. For updates on the training progress, " + \
@@ -109,10 +115,11 @@ def train(args):
               "want to see the progress bar, use the argparse option \"progress_bar\".\n")
 
     # Training
-    # with torch.autograd.set_detect_anomaly(True):
+    with torch.autograd.set_detect_anomaly(True):
+        # trainer.tune(model, train_dataloader=train_dl, val_dataloaders=val_dls)
     # TODO this might be problematic, not supplying a real dataloader, only something iterable.
-    trainer.fit(model, train_dataloader=train_dl, val_dataloaders=val_dls)
-    print(modelcheckpoint.best_model_path)
+        trainer.fit(model, train_dataloader=train_dl, val_dataloaders=val_dls)
+        print(modelcheckpoint.best_model_path)
     # trainer.test(test_dataloaders=test_loader)
 
 
@@ -124,13 +131,14 @@ if __name__ == '__main__':
     parser = KNNBaseline.add_model_specific_args(parser)
 
     # trainer hyperparameters
-    parser.add_argument('--epochs', default=30, type=int,
+    parser.add_argument('--epochs', default=10, type=int,
                         help='Number of epochs to train.')
-    parser.add_argument('--batch_size', default=64, type=int,
+    parser.add_argument('--batch_size', default=32, type=int,
                         help='Batch size for training.')
     parser.add_argument('--split_fractions', default="0.8,0.1,0.1", type=lambda x: [float(f) for f in x.split(',')],
                         help='Split fractions e.g.: 0.8,0.1,0.1')
-
+    parser.add_argument('--datasets', default="twitter_davidson", type=lambda x: x.split(","),
+                        help='Names of datasets separated with commas.')
     parser.add_argument('--num_workers', default=0, type=int,
                         help='Number of workers for the tasks.')
 

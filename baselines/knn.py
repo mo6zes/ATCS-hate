@@ -11,12 +11,12 @@ import wandb
 class KNNBaseline(pl.LightningModule):
 
     def __init__(self, similarity='euclidean', transformer_model='bert-base-uncased', hidden_size=512,
-                 output_size=512, clfs_spec=None, lr=1e-2,  weight_decay=0, **kwargs):
+                 output_size=512, clfs_spec=None, lr=5e-5,  weight_decay=0, **kwargs):
         super().__init__()
         self.save_hyperparameters()
 
+        print("loading bert")
         self.encoder = BERT(transformer_model=transformer_model, hidden_size=hidden_size, output_size=output_size)
-        self.encoder.unfreeze_attention_layer([5, 6, 7, 8, 9, 10, 11], pooler=True)
 
         assert clfs_spec, "Classifier specification is required."
 
@@ -59,9 +59,13 @@ class KNNBaseline(pl.LightningModule):
                 loss = torch.nn.functional.cross_entropy(x, labels)
                 preds = x.argmax(dim=1).detach().cpu()
 
+            # print(x)
+            # print(preds)
+            # print(labels)
             accuracy = mtr.accuracy_score(labels.cpu().numpy(), preds.cpu().numpy())
             balanced_accuracy = mtr.balanced_accuracy_score(labels.cpu().numpy(), preds.cpu().numpy())
-
+            # print(accuracy)
+            # print(balanced_accuracy)
             self.log(f"train_{dataset_idx}_dataset", dataset_idx)
             self.log(f"train_{dataset_idx}_loss", loss)
             self.log(f"train_{dataset_idx}_acc", accuracy)

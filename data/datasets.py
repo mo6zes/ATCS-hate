@@ -349,6 +349,17 @@ class BalancedSampler(Sampler):
         return len(self.labels)
 
 
+ALL_DATASETS = {
+    "twitter_davidson": DataTwitterDavidson,
+    "foxnews": DataFoxNews,
+    "stormfront": DeGilbertStormFront,
+    "quian": QuianData,
+    "rezvan": RezvanHarrassment,
+    "founta": FountaDataset,
+    "talkdown": TalkdownDataset,
+    "wikipedia": WikipediaDataset
+}
+
 # if __name__ == "__main__":
 #     data_dir = './data/wikipediaAgressionCombined.csv'
 #     dataset = WikipediaDataset(data_dir)
