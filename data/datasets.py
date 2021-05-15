@@ -305,15 +305,18 @@ class BalancedSampler(Sampler):
     """
     def __init__(self, labels):
         self.labels = labels
-        self.num_classes = torch.numel(torch.unique(torch.stack(self.labels)))
+        self.num_classes = list(torch.unique(torch.stack(self.labels)).numpy())
 
-        self.class_indices = []
-        for i in range(self.num_classes):
+        self.class_indices = {}
+        for i in self.num_classes:
             lst = torch.unbind(torch.nonzero(torch.stack(self.labels) == i).squeeze(-1))
-            lst = [i.item() for i in lst]
-            self.class_indices.append(lst)
+            if len(lst) > 0:
+                lst = [i.item() for i in lst]
+                self.class_indices[str(i)] = lst
             
-        self.counts = [0] * self.num_classes
+        self.counts = {}
+        for i in self.num_classes:
+            self.counts[str(i)] = 0
         self.current_class = 0
 
     def __iter__(self):
@@ -328,19 +331,16 @@ class BalancedSampler(Sampler):
 
     def sample(self):
         chosen_class = self.get_class()
-        class_indices = self.class_indices[chosen_class]
+        class_indices = self.class_indices[str(chosen_class)]
         chosen_index = np.random.choice(class_indices)
-        self.counts[chosen_class] += 1
+        self.counts[str(chosen_class)] += 1
         return chosen_index
 
     def get_class(self):
-        min_count = self.counts[0]
-        min_classes = [0]
-        for i in range(1, self.num_classes):
-            if self.counts[i] < min_count:
-                min_count = self.counts[i]
-                min_classes = [i]
-            if self.counts[i] == min_count:
+        min_count = min([self.counts[i] for i in self.counts.keys()])
+        min_classes = [int(min(self.counts, key=self.counts.get))]
+        for i in self.num_classes:
+            if self.counts[str(i)] <= min_count and i not in min_classes:
                 min_classes.append(i)
         chosen_class = np.random.choice(min_classes)
         return chosen_class

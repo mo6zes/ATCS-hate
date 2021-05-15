@@ -41,13 +41,13 @@ class ProtoMAML(pl.LightningModule):
         x = self.protolayer(x)
         return x
 
-    def training_step(self, batch, batch_indx):
+    def training_step(self, batch, batch_idx):
         if not self.hparams.alt_step:
-            loss = self.default_step(batch, batch_indx)
+            loss = self.default_step(batch, batch_idx)
         else:
-            loss = self.alt_step(batch, batch_indx)
+            loss = self.alt_step(batch, batch_idx)
         
-    def default_step(self, batch, batch_indx):
+    def default_step(self, batch, batch_idx):
         # get the optimizer
         opt = self.optimizers()
         
@@ -67,7 +67,7 @@ class ProtoMAML(pl.LightningModule):
                 # ensure that our model is trainable and reset the gradients.
                 self.train()
                 fmodel.train()
-                self.zero_grad(fmodel)
+                self.clear_grad(fmodel)
                 
                 # perform task adaptation for k inner steps
                 data_iter = iter(support_loader)
@@ -126,7 +126,7 @@ class ProtoMAML(pl.LightningModule):
         
         # update the original model parameters and reset the gradients
         opt.step()
-        self.zero_grad(self.model)
+        self.clear_grad(self.model)
         
         metrics = self.reduce_metrics('train')
         
@@ -176,7 +176,7 @@ class ProtoMAML(pl.LightningModule):
     def protolayer(self, tensor, weight, bias):
         return F.linear(tensor, self.weight+weight, self.bias+bias)
         
-    def zero_grad(self, module):
+    def clear_grad(self, module):
         for param in filter(lambda p: p.requires_grad, module.parameters()):
             param.grad = None
             
@@ -190,12 +190,11 @@ class ProtoMAML(pl.LightningModule):
         for mode in self.metric_dict.keys():
             for metric in self.metric_dict[mode].keys():
                 mean_m = torch.stack(self.metric_dict[mode][metric]).mean()
-                if metric in prog_bar_metrics and state == 'train':
+                if metric in prog_bar_metrics:
                     metrics[mode+'_'+metric] = mean_m
                 self.log(f"{'_'.join([state, mode, metric])}", mean_m, on_step=False, on_epoch=True)
         self.metric_dict = defaultdict(lambda: defaultdict(list))
         return metrics
-    
     
     def validation_step(self, batch, batch_idx):
         torch.set_grad_enabled(True)
@@ -203,14 +202,17 @@ class ProtoMAML(pl.LightningModule):
         torch.set_grad_enabled(False)
         return loss
     
-    def test_step(self, batch, batch_indx):
+    def test_step(self, batch, batch_idx, dataset_idx):
         torch.set_grad_enabled(True)
         loss = self.eval_step(batch, batch_idx, mode="test")
         torch.set_grad_enabled(False)
         return loss
     
-    def eval_step(self, batch, batch_indx, mode="val"):
-        opt = self.optimizers()
+    def eval_step(self, batch, batch_idx, mode="val"):
+        try:
+            opt = self.optimizers().optimizer
+        except Exception:
+            opt = self.configure_optimizers()[0][0]
         
         for task in batch:
             support_loader = task.support_loader
@@ -218,9 +220,9 @@ class ProtoMAML(pl.LightningModule):
             
             weight, bias = self.calculate_prototypes(support_loader, task.n_classes)
             
-            with higher.innerloop_ctx(self.model, opt.optimizer, copy_initial_weights=False, track_higher_grads=False) as (fmodel, diffopt):
+            with higher.innerloop_ctx(self.model, opt, copy_initial_weights=False, track_higher_grads=False) as (fmodel, diffopt):
                 fmodel.train()
-                self.zero_grad(fmodel)
+                self.clear_grad(fmodel)
                 
                 # perform task adaptation for k inner steps
                 data_iter = iter(support_loader)
@@ -235,7 +237,7 @@ class ProtoMAML(pl.LightningModule):
                     self.weight = self.weight - self.output_lr * weight_grad
                     self.bias = self.bias - self.output_lr * bias_grad
                     
-                    diffopt.step(support_loss, retain_graph=True)
+                    diffopt.step(support_loss,  retain_graph=True)
                     del support_loss
                     
                     self.calc_metrics(pred_y, batch_y, task.n_classes, mode='support')
@@ -243,7 +245,7 @@ class ProtoMAML(pl.LightningModule):
 
                 # test on the query set
                 fmodel.eval()
-                with torch.nograd():
+                with torch.no_grad():
                     for i, (batch_x, batch_y) in enumerate(query_loader):
                         batch_x = [i.to(self.device) for i in batch_x]
                         batch_y = batch_y.to(self.device)
@@ -255,7 +257,7 @@ class ProtoMAML(pl.LightningModule):
         
         return metrics['query_loss']
             
-    def alt_step(self, batch, batch_indx):
+    def alt_step(self, batch, batch_idx):
         # get the optimizer
         opt = self.optimizers()
         
@@ -278,7 +280,7 @@ class ProtoMAML(pl.LightningModule):
             # ensure that our model is trainable and reset the gradients.
             self.train()
             model_e.train()
-            self.zero_grad(model_e)
+            self.clear_grad(model_e)
 
             # perform task adaptation for k inner steps
             data_iter = iter(support_loader)
@@ -308,7 +310,7 @@ class ProtoMAML(pl.LightningModule):
                         param.grad = grad
                 
                 e_opt.step()
-                self.zero_grad(model_e)
+                self.clear_grad(model_e)
                 self.weight.grad = None
                 self.bias.grad = None
 
@@ -352,7 +354,7 @@ class ProtoMAML(pl.LightningModule):
         
         # update the original model parameters and reset the gradients
         opt.step()
-        self.zero_grad(self.model)
+        self.clear_grad(self.model)
 
         metrics = self.reduce_metrics('train')
         

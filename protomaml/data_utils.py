@@ -3,11 +3,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from numpy.random import default_rng
+from collections import defaultdict
+from random import shuffle as randomshuffle
 from torch.utils.data import Dataset, DataLoader, Subset
 
 from models.model_utils import create_tokenizer
 
-import time
 
 class Task():
     """ This task class hold two dataloader and some info about the task"""
@@ -20,7 +21,7 @@ class Task():
         self.n_classes = n_classes
 
 class MetaDataloader(Dataset):
-    """ The metaloader is an iterator which randomly returns Tasks"""
+    """ The metaloader is an iterator which returns Tasks"""
     def __init__(self, tasks: list):
         self.tasks = tasks
 
@@ -44,7 +45,7 @@ def create_metaloader(tasks, batch_size=1, shuffle=False, num_workers=0,
 
 def prepare_batch(batch, tokenizer=create_tokenizer()):
     """Transform the text and labels into tensors.
-        The text is also tokenized and padded automatically."""
+       The text is also tokenized and padded automatically."""
     texts = [i[0] for i in batch]
     labels = torch.stack([i[-1] for i in batch])
     texts = tokenizer(texts, padding=True, truncation=True, return_tensors="pt", max_length=256)
@@ -52,7 +53,7 @@ def prepare_batch(batch, tokenizer=create_tokenizer()):
 
 def create_dataloader(dataset, batch_size=1, shuffle=None, num_workers=0,
                       collate_fn=prepare_batch, pin_memory=False, sampler=None):
-    """Create a dataloader given a dataset. Small wrapper"""
+    """Create a dataloader given a dataset. Small wrapper."""
     return DataLoader(dataset,
                       batch_size=batch_size,
                       shuffle=shuffle,
@@ -135,3 +136,17 @@ def generate_tasks_from_dataset(dataset, num_tasks=None, support_examples=100,
                     n_classes = dataset.n_classes)
         tasks.append(task)
     return tasks
+
+def train_val_split(tasks, ratio=0.9, shuffle=False):
+    if shuffle:
+        randomshuffle(tasks)
+    train = []
+    val = []
+    task_bucket = defaultdict(list)
+    for task in tasks:
+        task_bucket[task.task_name].append(task)
+    for bucket in task_bucket.keys():
+        split = int(np.round(len(task_bucket[bucket]) * ratio))
+        train.extend(task_bucket[bucket][:split])
+        val.extend(task_bucket[bucket][split:])
+    return train, val

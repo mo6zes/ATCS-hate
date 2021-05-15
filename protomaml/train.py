@@ -8,7 +8,7 @@ from protomaml.protomaml import ProtoMAML
 import wandb
 
 from .utils import generate_tasks
-from .data_utils import create_metaloader
+from .data_utils import create_metaloader, train_val_split
 from data.datasets import DataTwitterDavidson, DataFoxNews, DeGilbertStormFront, QuianData, RezvanHarrassment, FountaDataset, TalkdownDataset, WikipediaDataset
 
 
@@ -25,6 +25,12 @@ class MemoryCallback(pl.Callback):
         super().__init__()
 
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx):
+        torch.cuda.empty_cache() 
+    
+    def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx):
+        torch.cuda.empty_cache()  
+        
+    def on_test_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx):
         torch.cuda.empty_cache()  
             
 class PrintCallback(pl.Callback):
@@ -43,27 +49,35 @@ def train(args):
     wandb_logger = WandbLogger(project='protomaml', entity='atcs-project', tags=['meta-learning', 'protomaml'], version=0, log_model=True, group="ProtoMAML")
     
     # create dataloaders
-    train_tasks = generate_tasks(args, dataset_list=[DataFoxNews(), DeGilbertStormFront(), QuianData(),
-                                                     RezvanHarrassment(), FountaDataset(), WikipediaDataset()])
-    test_tasks = generate_tasks(args, dataset_list=[DataTwitterDavidson(),
-                                                    QuianData("./raw_datasets/redditQuian.csv"),
-                                                    TalkdownDataset()])
+    tasks = generate_tasks(args, dataset_list=[DataFoxNews(), DeGilbertStormFront(), QuianData(),
+                                               RezvanHarrassment(), FountaDataset(), WikipediaDataset()])
+    train_tasks, val_tasks = train_val_split(tasks, shuffle=False)
+    
     meta_train_loader = create_metaloader(train_tasks, batch_size=args.meta_batch_size, shuffle=True)
-    meta_test_loader = create_metaloader(test_tasks, batch_size=args.meta_batch_size, shuffle=False)
-    print(f"Training using {len(train_tasks)} tasks, evaluating with {len(test_tasks)} tasks.")
+    meta_val_loader = create_metaloader(val_tasks, batch_size=args.meta_batch_size, shuffle=False)
+    
+    test_Twitter = generate_tasks(args, dataset_list=[DataTwitterDavidson()], sampler=None)
+    test_QuianReddit = generate_tasks(args, dataset_list=[QuianData("./raw_datasets/redditQuian.csv")], sampler=None)
+    test_Talkdown = generate_tasks(args, dataset_list=[TalkdownDataset()], sampler=None)
+    
+    meta_test_Twitter_loader = create_metaloader(test_Twitter, batch_size=args.meta_batch_size, shuffle=False)
+    meta_test_QuianReddit_loader = create_metaloader(test_QuianReddit, batch_size=args.meta_batch_size, shuffle=False)
+    meta_test_Talkdown_loader = create_metaloader(test_Talkdown, batch_size=args.meta_batch_size, shuffle=False)
+    
+    print(f"Training using {len(train_tasks)} tasks, evaluating with {len(val_tasks)} tasks.")
 
     # Create a PyTorch Lightning trainer
     callbacks = []
     callbacks.append(MemoryCallback())
-    modelcheckpoint = ModelCheckpoint(monitor='train_query_f1', mode='max', save_top_k=1,
-                                      save_last=True, filename='{epoch}-{train_query_loss:.3f}-{train_query_acc:.3f}-{train_query_f1:.3f}')
+    modelcheckpoint = ModelCheckpoint(monitor='val_query_f1', mode='max', save_top_k=1,
+                                      save_last=True, filename='{epoch}-{train_query_loss:.3f}-{train_query_acc:.3f}-{train_query_f1:.3f}-{val_query_loss:.3f}-{val_query_acc:.3f}-{val_query_f1:.3f}')
     callbacks.append(modelcheckpoint)
     callbacks.append(LearningRateMonitor())
     try:
         wandb_logger
     except Exception:
         callbacks.append(LogCallback())
-    callbacks.append(EarlyStopping(monitor='train_query_f1', mode='max', patience=3))
+    callbacks.append(EarlyStopping(monitor='val_query_f1', mode='max', patience=3))
     if not args.progress_bar:
         callbacks.append(PrintCallback())
         
@@ -100,10 +114,12 @@ def train(args):
 
     # Training
     # with torch.autograd.set_detect_anomaly(True):
-    trainer.tune(model, train_dataloader=meta_train_loader, val_dataloader=meta_test_loader)
-    trainer.fit(model, train_dataloader=meta_train_loader, val_dataloader=meta_test_loader)
-    print(modelcheckpoint.best_model_path)
-    trainer.test(test_dataloaders=meta_test_loader)
+    if not args.test_model:
+        trainer.tune(model, train_dataloader=meta_train_loader, val_dataloaders=meta_val_loader)
+        trainer.fit(model, train_dataloader=meta_train_loader, val_dataloaders=meta_val_loader)
+        print(modelcheckpoint.best_model_path)
+    else:
+        trainer.test(model, test_dataloaders=[meta_test_Twitter_loader, meta_test_QuianReddit_loader, meta_test_Talkdown_loader])
 
 
 if __name__ == '__main__':
@@ -156,6 +172,9 @@ if __name__ == '__main__':
                         help='Percentage of data to validate with.')
     parser.add_argument('--test_limit', default=1.0, type=float,
                         help='Percentage of data to test with.')
+    
+    parser.add_argument('--test_model', action='store_true',
+                        help='Test the current model in k-shot fashion.')
     
     parser.add_argument('--progress_bar', action='store_true',
                         help='Use a progress bar indicator for interactive experimentation. '+ \
