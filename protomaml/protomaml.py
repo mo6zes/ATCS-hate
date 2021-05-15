@@ -31,7 +31,7 @@ class ProtoMAML(pl.LightningModule):
         self.output_lr = self.hparams.lr * 100
         
         # metric logging
-        self.log_dict = defaultdict(lambda: defaultdict(list))
+        self.metric_dict = defaultdict(lambda: defaultdict(list))
         
     def feature_forward(self, x):
         return self.model(x)
@@ -181,20 +181,79 @@ class ProtoMAML(pl.LightningModule):
             param.grad = None
             
     def calc_metrics(self, pred_y, batch_y, num_classes, mode='support'):
-        self.log_dict[mode]['loss'].append(F.cross_entropy(pred_y.detach(), batch_y.detach()))
-        self.log_dict[mode]['acc'].append(f.accuracy(F.softmax(pred_y.detach(), dim=-1), batch_y.detach()))
-        self.log_dict[mode]['f1'].append(f.f1(F.softmax(pred_y.detach(), dim=-1), batch_y.detach(), num_classes=num_classes))
+        self.metric_dict[mode]['loss'].append(F.cross_entropy(pred_y.detach(), batch_y.detach()))
+        self.metric_dict[mode]['acc'].append(f.accuracy(F.softmax(pred_y.detach(), dim=-1), batch_y.detach()))
+        self.metric_dict[mode]['f1'].append(f.f1(F.softmax(pred_y.detach(), dim=-1), batch_y.detach(), num_classes=num_classes))
         
     def reduce_metrics(self, state='train', prog_bar_metrics=['loss', 'acc']):
         metrics = {}
-        for mode in self.log_dict.keys():
-            for metric in self.log_dict[mode].keys():
-                mean_m = torch.stack(self.log_dict[mode][metric]).mean()
+        for mode in self.metric_dict.keys():
+            for metric in self.metric_dict[mode].keys():
+                mean_m = torch.stack(self.metric_dict[mode][metric]).mean()
                 if metric in prog_bar_metrics and state == 'train':
                     metrics[mode+'_'+metric] = mean_m
                 self.log(f"{'_'.join([state, mode, metric])}", mean_m, on_step=False, on_epoch=True)
-        self.log_dict = defaultdict(lambda: defaultdict(list))
+        self.metric_dict = defaultdict(lambda: defaultdict(list))
         return metrics
+    
+    
+    def validation_step(self, batch, batch_idx):
+        torch.set_grad_enabled(True)
+        loss = self.eval_step(batch, batch_idx, mode="val")
+        torch.set_grad_enabled(False)
+        return loss
+    
+    def test_step(self, batch, batch_indx):
+        torch.set_grad_enabled(True)
+        loss = self.eval_step(batch, batch_idx, mode="test")
+        torch.set_grad_enabled(False)
+        return loss
+    
+    def eval_step(self, batch, batch_indx, mode="val"):
+        opt = self.optimizers()
+        
+        for task in batch:
+            support_loader = task.support_loader
+            query_loader = task.query_loader
+            
+            weight, bias = self.calculate_prototypes(support_loader, task.n_classes)
+            
+            with higher.innerloop_ctx(self.model, opt.optimizer, copy_initial_weights=False, track_higher_grads=False) as (fmodel, diffopt):
+                fmodel.train()
+                self.zero_grad(fmodel)
+                
+                # perform task adaptation for k inner steps
+                data_iter = iter(support_loader)
+                for i in range(min(self.hparams.eval_updates, len(support_loader))):
+                    batch_x, batch_y = next(data_iter)
+                    batch_x = [i.to(self.device) for i in batch_x]
+                    batch_y = batch_y.to(self.device)
+                    pred_y = self.protolayer(fmodel(batch_x), weight, bias)
+                    support_loss = F.cross_entropy(pred_y, batch_y)
+                    
+                    weight_grad, bias_grad = torch.autograd.grad(support_loss, [self.weight, self.bias], retain_graph=True)
+                    self.weight = self.weight - self.output_lr * weight_grad
+                    self.bias = self.bias - self.output_lr * bias_grad
+                    
+                    diffopt.step(support_loss, retain_graph=True)
+                    del support_loss
+                    
+                    self.calc_metrics(pred_y, batch_y, task.n_classes, mode='support')
+                    del pred_y
+
+                # test on the query set
+                fmodel.eval()
+                with torch.nograd():
+                    for i, (batch_x, batch_y) in enumerate(query_loader):
+                        batch_x = [i.to(self.device) for i in batch_x]
+                        batch_y = batch_y.to(self.device)
+                        pred_y = self.protolayer(fmodel(batch_x), weight, bias)
+                        query_loss = F.cross_entropy(pred_y, batch_y)
+                        self.calc_metrics(pred_y, batch_y, task.n_classes, mode='query')
+        
+        metrics = self.reduce_metrics(mode)
+        
+        return metrics['query_loss']
             
     def alt_step(self, batch, batch_indx):
         # get the optimizer
@@ -317,6 +376,8 @@ class ProtoMAML(pl.LightningModule):
                             help='Output size of the MLP on top of the transformer.')
         parser.add_argument('--inner_updates', default=100, type=int,
                             help='Number of steps taken in the inner loop.')
+        parser.add_argument('--eval_updates', default=10, type=int,
+                            help='Number of steps taken in the inner loop during evaluation.')
 
         # Optimizer hyperparameters
         parser.add_argument('--lr', default=5e-5, type=float,

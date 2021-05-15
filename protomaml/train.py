@@ -9,7 +9,7 @@ import wandb
 
 from .utils import generate_tasks
 from .data_utils import create_metaloader
-from data.datasets import DataTwitterDavidson, RezvanHarrassment
+from data.datasets import DataTwitterDavidson, DataFoxNews, DeGilbertStormFront, QuianData, RezvanHarrassment, FountaDataset, TalkdownDataset, WikipediaDataset
 
 
 class LogCallback(pl.Callback):
@@ -43,22 +43,27 @@ def train(args):
     wandb_logger = WandbLogger(project='protomaml', entity='atcs-project', tags=['meta-learning', 'protomaml'], version=0, log_model=True, group="ProtoMAML")
     
     # create dataloaders
-    tasks = generate_tasks(args)
-    print(f"Training using {len(tasks)} tasks.")
-    meta_loader = create_metaloader(tasks, batch_size=args.meta_batch_size, shuffle=True)
+    train_tasks = generate_tasks(args, dataset_list=[DataFoxNews(), DeGilbertStormFront(), QuianData(),
+                                                     RezvanHarrassment(), FountaDataset(), WikipediaDataset()])
+    test_tasks = generate_tasks(args, dataset_list=[DataTwitterDavidson(),
+                                                    QuianData("./raw_datasets/redditQuian.csv"),
+                                                    TalkdownDataset()])
+    meta_train_loader = create_metaloader(train_tasks, batch_size=args.meta_batch_size, shuffle=True)
+    meta_test_loader = create_metaloader(test_tasks, batch_size=args.meta_batch_size, shuffle=False)
+    print(f"Training using {len(train_tasks)} tasks, evaluating with {len(test_tasks)} tasks.")
 
     # Create a PyTorch Lightning trainer
     callbacks = []
     callbacks.append(MemoryCallback())
-    modelcheckpoint = ModelCheckpoint(monitor='train_query_acc', mode='max', save_top_k=1,
-                                      save_last=True, filename='{epoch}-{train_query_loss:.3f}-{train_query_acc:.3f}')
+    modelcheckpoint = ModelCheckpoint(monitor='train_query_f1', mode='max', save_top_k=1,
+                                      save_last=True, filename='{epoch}-{train_query_loss:.3f}-{train_query_acc:.3f}-{train_query_f1:.3f}')
     callbacks.append(modelcheckpoint)
     callbacks.append(LearningRateMonitor())
     try:
         wandb_logger
     except Exception:
         callbacks.append(LogCallback())
-    callbacks.append(EarlyStopping(monitor='train_query_acc', mode='max', patience=8))
+    callbacks.append(EarlyStopping(monitor='train_query_f1', mode='max', patience=3))
     if not args.progress_bar:
         callbacks.append(PrintCallback())
         
@@ -95,10 +100,10 @@ def train(args):
 
     # Training
     # with torch.autograd.set_detect_anomaly(True):
-    trainer.tune(model, train_dataloader=meta_loader)
-    trainer.fit(model, train_dataloader=meta_loader)
+    trainer.tune(model, train_dataloader=meta_train_loader, val_dataloader=meta_test_loader)
+    trainer.fit(model, train_dataloader=meta_train_loader, val_dataloader=meta_test_loader)
     print(modelcheckpoint.best_model_path)
-    # trainer.test(test_dataloaders=test_loader)
+    trainer.test(test_dataloaders=meta_test_loader)
 
 
 if __name__ == '__main__':
@@ -109,7 +114,7 @@ if __name__ == '__main__':
     parser = ProtoMAML.add_model_specific_args(parser)
     
     # trainer hyperparameters
-    parser.add_argument('--epochs', default=50, type=int,
+    parser.add_argument('--epochs', default=25, type=int,
                         help='Number of epochs to train.')
     parser.add_argument('--batch_size', default=64, type=int,
                         help='Batch size for training.')
