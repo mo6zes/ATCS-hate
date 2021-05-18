@@ -51,7 +51,7 @@ def train(args):
     # create dataloaders
     tasks = generate_tasks(args, dataset_list=[DataFoxNews(), DeGilbertStormFront(), QuianData(),
                                                RezvanHarrassment(), FountaDataset(), WikipediaDataset()])
-    train_tasks, val_tasks = train_val_split(tasks, shuffle=False)
+    train_tasks, val_tasks = train_val_split(tasks, ratio=0.85, shuffle=False)
     
     meta_train_loader = create_metaloader(train_tasks, batch_size=args.meta_batch_size, shuffle=True)
     meta_val_loader = create_metaloader(val_tasks, batch_size=args.meta_batch_size, shuffle=False)
@@ -77,7 +77,7 @@ def train(args):
         wandb_logger
     except Exception:
         callbacks.append(LogCallback())
-    callbacks.append(EarlyStopping(monitor='val_query_f1', mode='max', patience=3))
+    callbacks.append(EarlyStopping(monitor='val_query_f1', mode='max', patience=args.patience))
     if not args.progress_bar:
         callbacks.append(PrintCallback())
         
@@ -106,6 +106,13 @@ def train(args):
     # Create model
     dict_args = vars(args)
     model = ProtoMAML(**dict_args)
+	
+	if args.checkpoint_path:
+        state_dict = torch.load(args.checkpoint_path, map_location=model.device)
+        if 'state_dict' in state_dict.keys():
+            state_dict = state_dict['state_dict']
+        model.load_state_dict(state_dict, strict=False)
+        print("Loaded parameters from checkpoint.")
         
 #     if not args.progress_bar:
 #         print("\nThe progress bar has been surpressed. For updates on the training progress, " + \
@@ -118,8 +125,7 @@ def train(args):
         trainer.tune(model, train_dataloader=meta_train_loader, val_dataloaders=meta_val_loader)
         trainer.fit(model, train_dataloader=meta_train_loader, val_dataloaders=meta_val_loader)
         print(modelcheckpoint.best_model_path)
-    else:
-        trainer.test(model, test_dataloaders=[meta_test_Twitter_loader, meta_test_QuianReddit_loader, meta_test_Talkdown_loader])
+    trainer.test(model, test_dataloaders=[meta_test_Twitter_loader, meta_test_QuianReddit_loader, meta_test_Talkdown_loader])
 
 
 if __name__ == '__main__':
@@ -141,6 +147,9 @@ if __name__ == '__main__':
                         help='Number of workers for the tasks.')
     
     parser.add_argument('--query_examples', default=100, type=int,
+                        help='Number of batches in the query loader.')
+    
+    parser.add_argument('--patience', default=5, type=int,
                         help='Number of batches in the query loader.')
     
     parser.add_argument('--precision', default=32, type=int,

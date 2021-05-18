@@ -183,7 +183,8 @@ class ProtoMAML(pl.LightningModule):
     def calc_metrics(self, pred_y, batch_y, num_classes, mode='support'):
         self.metric_dict[mode]['loss'].append(F.cross_entropy(pred_y.detach(), batch_y.detach()))
         self.metric_dict[mode]['acc'].append(f.accuracy(F.softmax(pred_y.detach(), dim=-1), batch_y.detach()))
-        self.metric_dict[mode]['f1'].append(f.f1(F.softmax(pred_y.detach(), dim=-1), batch_y.detach(), num_classes=num_classes))
+        self.metric_dict[mode]['f1'].append(f.f1(F.softmax(pred_y.detach(), dim=-1), batch_y.detach(), num_classes=num_classes, average='macro'))
+        self.metric_dict[mode]['bal_acc'].append(f.accuracy(F.softmax(pred_y.detach(), dim=-1), batch_y.detach(), num_classes=num_classes, average='macro'))
         
     def reduce_metrics(self, state='train', prog_bar_metrics=['loss', 'acc']):
         metrics = {}
@@ -209,10 +210,7 @@ class ProtoMAML(pl.LightningModule):
         return loss
     
     def eval_step(self, batch, batch_idx, mode="val"):
-        try:
-            opt = self.optimizers().optimizer
-        except Exception:
-            opt = self.configure_optimizers()[0][0]
+        opt = self.configure_optimizers()[0][0]
         
         for task in batch:
             support_loader = task.support_loader
@@ -250,8 +248,9 @@ class ProtoMAML(pl.LightningModule):
                         batch_x = [i.to(self.device) for i in batch_x]
                         batch_y = batch_y.to(self.device)
                         pred_y = self.protolayer(fmodel(batch_x), weight, bias)
-                        query_loss = F.cross_entropy(pred_y, batch_y)
                         self.calc_metrics(pred_y, batch_y, task.n_classes, mode='query')
+                        
+        del opt
         
         metrics = self.reduce_metrics(mode)
         
