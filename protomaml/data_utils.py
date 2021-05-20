@@ -5,7 +5,7 @@ import numpy as np
 from numpy.random import default_rng
 from collections import defaultdict
 from random import shuffle as randomshuffle
-from torch.utils.data import Dataset, DataLoader, Subset
+from torch.utils.data import Dataset, DataLoader, Subset, Sampler
 
 from models.model_utils import create_tokenizer
 
@@ -136,8 +136,29 @@ def generate_tasks_from_dataset(dataset, num_tasks=None, support_examples=100,
                     n_classes = dataset.n_classes)
         tasks.append(task)
     return tasks
+	
+def resample_tasks(tasks):
+	rng = default_rng()
+    resampled_tasks = []
+    task_bucket = defaultdict(list)
+    for task in tasks:
+        task_bucket[task.task_name].append(task)
+	num_task = torch.mean(torch.stack([torch.Tensor([len(task_bucket[i])]) for i in task_bucket.keys()]))
+    for bucket in task_bucket.keys():
+		if len(task_bucket[bucket]) >= num_task:
+			sampled_tasks = rng.choice(task_bucket[bucket], size=num_task, replace=False)
+			resampled_tasks.extend(sampled_tasks)
+		else:
+			multiple = num_task // len(task_bucket[bucket])
+			residual = num_task - (multiple * len(task_bucket[bucket]))
+			for i in range(multiple):
+				resampled_tasks.extend(task_bucket[bucket])
+			if residual > 0:
+				sampled_tasks = rng.choice(task_bucket[bucket], size=residual, replace=False)
+				resampled_tasks.extend(sampled_tasks)
+    return resampled_tasks
 
-def train_val_split(tasks, ratio=0.9, shuffle=False):
+def train_val_split(tasks, ratio=0.9, shuffle=True):
     if shuffle:
         randomshuffle(tasks)
     train = []
@@ -150,3 +171,51 @@ def train_val_split(tasks, ratio=0.9, shuffle=False):
         train.extend(task_bucket[bucket][:split])
         val.extend(task_bucket[bucket][split:])
     return train, val
+	
+class BalancedTaskSampler(Sampler):
+    """
+    Sample from dataset in a balanced manner. No guarantee all the samples are seen during training.
+    """
+    def __init__(self, tasks):
+        self.len_tasks = len(tasks)
+        self.datasets_names = list(set([i.task_name for i in tasks]))
+
+        self.indices = {}
+        for i in self.datasets_names:
+			lst = [index(j) for j in tasks if j.task_name==i]
+            if len(lst) > 0:
+				self.indices[i] = lst
+            
+        self.counts = {}
+        for i in self.datasets_names:
+            self.counts[i] = 0
+        self.current_class = self.datasets_names[0]
+
+    def __iter__(self):
+        self.count = 0
+        return self
+
+    def __next__(self):
+        if self.count >= self.len_tasks:
+            raise StopIteration
+        self.count += 1
+        return self.sample()
+
+    def sample(self):
+        chosen_class = self.get_class()
+        class_indices = self.indices[chosen_class]
+        chosen_index = np.random.choice(class_indices)
+        self.counts[chosen_class] += 1
+        return chosen_index
+
+    def get_class(self):
+        min_count = min([self.counts[i] for i in self.counts.keys()])
+        min_classes = [int(min(self.counts, key=self.counts.get))]
+        for i in self.num_classes:
+            if self.counts[i] <= min_count and i not in min_classes:
+                min_classes.append(i)
+        chosen_class = np.random.choice(min_classes)
+        return chosen_class
+
+    def __len__(self):
+        return self.len_tasks
