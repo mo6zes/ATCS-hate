@@ -36,11 +36,12 @@ def meta_collate_fn(batch):
     return batch
 
 def create_metaloader(tasks, batch_size=1, shuffle=False, num_workers=0,
-                      collate_fn=meta_collate_fn, pin_memory=False):
+                      collate_fn=meta_collate_fn, pin_memory=False, sampler=None):
     dataset = MetaDataloader(tasks)
     dataloader = DataLoader(dataset, batch_size=batch_size,
                             shuffle=shuffle, num_workers=num_workers,
-                            collate_fn=collate_fn, pin_memory=pin_memory)
+                            collate_fn=collate_fn, pin_memory=pin_memory,
+                            sampler=sampler)
     return dataloader
 
 def prepare_batch(batch, tokenizer=create_tokenizer()):
@@ -136,29 +137,29 @@ def generate_tasks_from_dataset(dataset, num_tasks=None, support_examples=100,
                     n_classes = dataset.n_classes)
         tasks.append(task)
     return tasks
-	
+
 def resample_tasks(tasks):
-	rng = default_rng()
+    rng = default_rng()
     resampled_tasks = []
     task_bucket = defaultdict(list)
     for task in tasks:
         task_bucket[task.task_name].append(task)
-	num_task = torch.mean(torch.stack([torch.Tensor([len(task_bucket[i])]) for i in task_bucket.keys()]))
+    num_task = torch.mean(torch.stack([torch.Tensor([len(task_bucket[i])]) for i in task_bucket.keys()]))
     for bucket in task_bucket.keys():
-		if len(task_bucket[bucket]) >= num_task:
-			sampled_tasks = rng.choice(task_bucket[bucket], size=num_task, replace=False)
-			resampled_tasks.extend(sampled_tasks)
-		else:
-			multiple = num_task // len(task_bucket[bucket])
-			residual = num_task - (multiple * len(task_bucket[bucket]))
-			for i in range(multiple):
-				resampled_tasks.extend(task_bucket[bucket])
-			if residual > 0:
-				sampled_tasks = rng.choice(task_bucket[bucket], size=residual, replace=False)
-				resampled_tasks.extend(sampled_tasks)
+        if len(task_bucket[bucket]) >= num_task:
+            sampled_tasks = rng.choice(task_bucket[bucket], size=num_task, replace=False)
+            resampled_tasks.extend(sampled_tasks)
+        else:
+            multiple = num_task // len(task_bucket[bucket])
+            residual = num_task - (multiple * len(task_bucket[bucket]))
+            for i in range(multiple):
+                resampled_tasks.extend(task_bucket[bucket])
+            if residual > 0:
+                sampled_tasks = rng.choice(task_bucket[bucket], size=residual, replace=False)
+                resampled_tasks.extend(sampled_tasks)
     return resampled_tasks
 
-def train_val_split(tasks, ratio=0.9, shuffle=True):
+def train_val_split(tasks, ratio=0.9, shuffle=False):
     if shuffle:
         randomshuffle(tasks)
     train = []
@@ -171,20 +172,17 @@ def train_val_split(tasks, ratio=0.9, shuffle=True):
         train.extend(task_bucket[bucket][:split])
         val.extend(task_bucket[bucket][split:])
     return train, val
-	
+    
 class BalancedTaskSampler(Sampler):
-    """
-    Sample from dataset in a balanced manner. No guarantee all the samples are seen during training.
-    """
     def __init__(self, tasks):
         self.len_tasks = len(tasks)
         self.datasets_names = list(set([i.task_name for i in tasks]))
 
         self.indices = {}
         for i in self.datasets_names:
-			lst = [index(j) for j in tasks if j.task_name==i]
+            lst = [tasks.index(j) for j in tasks if j.task_name==i]
             if len(lst) > 0:
-				self.indices[i] = lst
+                self.indices[i] = lst
             
         self.counts = {}
         for i in self.datasets_names:
@@ -210,8 +208,8 @@ class BalancedTaskSampler(Sampler):
 
     def get_class(self):
         min_count = min([self.counts[i] for i in self.counts.keys()])
-        min_classes = [int(min(self.counts, key=self.counts.get))]
-        for i in self.num_classes:
+        min_classes = [min(self.counts, key=self.counts.get)]
+        for i in self.datasets_names:
             if self.counts[i] <= min_count and i not in min_classes:
                 min_classes.append(i)
         chosen_class = np.random.choice(min_classes)

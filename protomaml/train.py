@@ -8,7 +8,7 @@ from protomaml.protomaml import ProtoMAML
 import wandb
 
 from .utils import generate_tasks
-from .data_utils import create_metaloader, train_val_split
+from .data_utils import create_metaloader, train_val_split, BalancedTaskSampler
 from data.datasets import DataTwitterDavidson, DataFoxNews, DeGilbertStormFront, QuianData, RezvanHarrassment, FountaDataset, TalkdownDataset, WikipediaDataset
 
 
@@ -46,14 +46,14 @@ def train(args):
 #     os.makedirs(args.log_dir, exist_ok=True)
     
     # create logger
-    wandb_logger = WandbLogger(project='protomaml', entity='atcs-project', tags=['meta-learning', 'protomaml'], version=0, log_model=True, group="ProtoMAML")
+    wandb_logger = WandbLogger(project='protomaml', entity='atcs-project', tags=['meta-learning', 'protomaml'], version=0, log_model=True, group=f"ProtoMAML Train")
     
     # create dataloaders
     tasks = generate_tasks(args, dataset_list=[DataFoxNews(), DeGilbertStormFront(), QuianData(),
                                                RezvanHarrassment(), FountaDataset(), WikipediaDataset()])
     train_tasks, val_tasks = train_val_split(tasks, ratio=0.85, shuffle=False)
     
-    meta_train_loader = create_metaloader(train_tasks, batch_size=args.meta_batch_size, shuffle=True)
+    meta_train_loader = create_metaloader(train_tasks, batch_size=args.meta_batch_size, sampler=BalancedTaskSampler(train_tasks))
     meta_val_loader = create_metaloader(val_tasks, batch_size=args.meta_batch_size, shuffle=False)
     
     test_Twitter = generate_tasks(args, dataset_list=[DataTwitterDavidson()], sampler=None)
@@ -69,7 +69,7 @@ def train(args):
     # Create a PyTorch Lightning trainer
     callbacks = []
     callbacks.append(MemoryCallback())
-    modelcheckpoint = ModelCheckpoint(monitor='val_query_f1', mode='max', save_top_k=1,
+    modelcheckpoint = ModelCheckpoint(monitor='val_query_loss', mode='min', save_top_k=-1,
                                       save_last=True, filename='{epoch}-{train_query_loss:.3f}-{train_query_acc:.3f}-{train_query_f1:.3f}-{val_query_loss:.3f}-{val_query_acc:.3f}-{val_query_f1:.3f}')
     callbacks.append(modelcheckpoint)
     callbacks.append(LearningRateMonitor())
@@ -77,7 +77,7 @@ def train(args):
         wandb_logger
     except Exception:
         callbacks.append(LogCallback())
-    callbacks.append(EarlyStopping(monitor='val_query_f1', mode='max', patience=args.patience))
+    callbacks.append(EarlyStopping(monitor='val_query_loss', mode='min', patience=args.patience))
     if not args.progress_bar:
         callbacks.append(PrintCallback())
         
@@ -107,7 +107,7 @@ def train(args):
     dict_args = vars(args)
     model = ProtoMAML(**dict_args)
 	
-	if args.checkpoint_path:
+    if args.checkpoint_path:
         state_dict = torch.load(args.checkpoint_path, map_location=model.device)
         if 'state_dict' in state_dict.keys():
             state_dict = state_dict['state_dict']
