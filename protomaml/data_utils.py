@@ -118,8 +118,8 @@ def generate_tasks_from_dataset(dataset, num_tasks=None, support_examples=100,
                                                sampler=sampler([dataset.labels[i] for i in support_indices]))
             query_loader = create_dataloader(query_set,
                                              batch_size=kwargs['batch_size'],
-                                             num_workers=kwargs['num_workers'],
-                                             sampler=sampler([dataset.labels[i] for i in query_indices]))
+                                             shuffle=kwargs['shuffle'],
+                                             num_workers=kwargs['num_workers'])
         else:
             support_loader = create_dataloader(support_set,
                                                batch_size=kwargs['batch_size'],
