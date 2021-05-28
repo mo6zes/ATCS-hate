@@ -46,19 +46,19 @@ def train(args):
 #     os.makedirs(args.log_dir, exist_ok=True)
     
     # create logger
-    wandb_logger = WandbLogger(project='protomaml', entity='atcs-project', tags=['meta-learning', 'protomaml'], version=0, log_model=True, group=f"ProtoMAML Train")
+    wandb_logger = WandbLogger(project='protomaml', entity='atcs-project', tags=['meta-learning', 'protomaml'], version=0, log_model=True, group=f"ProtoMAML Eval 5:{args.inner_updates}")
     
     # create dataloaders
-    tasks = generate_tasks(args, dataset_list=[DataFoxNews(), DeGilbertStormFront(), QuianData(),
-                                               RezvanHarrassment(), FountaDataset(), WikipediaDataset()])
+    tasks = generate_tasks(args, dataset_list=[DataFoxNews(), DeGilbertStormFront(), QuianData(), TalkdownDataset(),
+                                               QuianData("./raw_datasets/redditQuian.csv"), WikipediaDataset()])
     train_tasks, val_tasks = train_val_split(tasks, ratio=0.85, shuffle=False)
     
     meta_train_loader = create_metaloader(train_tasks, batch_size=args.meta_batch_size, sampler=BalancedTaskSampler(train_tasks))
     meta_val_loader = create_metaloader(val_tasks, batch_size=args.meta_batch_size, shuffle=False)
     
-    test_Twitter = generate_tasks(args, dataset_list=[DataTwitterDavidson()], sampler=None)
-    test_QuianReddit = generate_tasks(args, dataset_list=[QuianData("./raw_datasets/redditQuian.csv")], sampler=None)
-    test_Talkdown = generate_tasks(args, dataset_list=[TalkdownDataset()], sampler=None)
+    test_Twitter = generate_tasks(args, dataset_list=[DataTwitterDavidson()])
+    test_QuianReddit = generate_tasks(args, dataset_list=[FountaDataset()])
+    test_Talkdown = generate_tasks(args, dataset_list=[RezvanHarrassment()])
     
     meta_test_Twitter_loader = create_metaloader(test_Twitter, batch_size=args.meta_batch_size, shuffle=False)
     meta_test_QuianReddit_loader = create_metaloader(test_QuianReddit, batch_size=args.meta_batch_size, shuffle=False)
@@ -69,7 +69,7 @@ def train(args):
     # Create a PyTorch Lightning trainer
     callbacks = []
     callbacks.append(MemoryCallback())
-    modelcheckpoint = ModelCheckpoint(monitor='val_query_loss', mode='min', save_top_k=-1,
+    modelcheckpoint = ModelCheckpoint(monitor='val_query_loss', mode='min', save_top_k=3,
                                       save_last=True, filename='{epoch}-{train_query_loss:.3f}-{train_query_acc:.3f}-{train_query_f1:.3f}-{val_query_loss:.3f}-{val_query_acc:.3f}-{val_query_f1:.3f}')
     callbacks.append(modelcheckpoint)
     callbacks.append(LearningRateMonitor())
