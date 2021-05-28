@@ -80,13 +80,13 @@ def train(args):
     modelcheckpoint = ModelCheckpoint(monitor='train_total_loss', mode='min', save_top_k=1,
                                       save_last=True, filename='{epoch}-{train_loss:.4f}-{train_acc:.3f}')
     callbacks.append(modelcheckpoint)
-    # callbacks.append(LogCallback())
+
     if not args.progress_bar:
         callbacks.append(PrintCallback())
     lr_monitor = LearningRateMonitor(logging_interval='step')
     callbacks.append(lr_monitor)
     wandb_logger = WandbLogger(project='hate-baseline', entity='atcs-project', config=vars(args))
-    # wandb.init(project='hate-baseline', entity='atcs-project', config=vars(args))
+
     trainer = pl.Trainer(default_root_dir=args.log_dir,
                          auto_select_gpus=torch.cuda.is_available(),
                          gpus=None if args.gpus == "None" else int(args.gpus),
@@ -116,11 +116,8 @@ def train(args):
 
     # Training
     with torch.autograd.set_detect_anomaly(True):
-        # trainer.tune(model, train_dataloader=train_dl, val_dataloaders=val_dls)
-    # TODO this might be problematic, not supplying a real dataloader, only something iterable.
         trainer.fit(model, train_dataloader=train_dl, val_dataloaders=train_dl + val_dls)
         print(modelcheckpoint.best_model_path)
-    # trainer.test(test_dataloaders=test_loader)
 
 
 if __name__ == '__main__':

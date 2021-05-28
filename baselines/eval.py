@@ -42,8 +42,6 @@ def eval(args):
     for i, tasks in enumerate(tasks_per_dataset):
         print("Evaluating dataset", i)
         # load the model
-
-
         model = KNNBaseline(**vars(args), clfs_spec=[datasets[i].n_classes]).to(device)
         state_dict = torch.load(args.model_path, map_location=device)
 
@@ -58,13 +56,10 @@ def eval(args):
                 state_dict["state_dict"][key] = model.state_dict()[key]
 
         model.load_state_dict(state_dict["state_dict"])
-        for_da_mean = []
-
-
+        results_per_task = []
 
         tasks = tasks[:10]
         for j, task in enumerate(tasks):
-            seen_in_support = set()
             print("Loading model for task", j)
             model.reset_classifiers()
             model.classifiers.to(device)
@@ -88,13 +83,6 @@ def eval(args):
                 batch_x, labels = data
                 batch_x = [b.to(device) for b in batch_x]
                 labels = labels.to(device)
-
-                for p, sample in enumerate(batch_x[0]):
-                    sample = tuple(list(sample.cpu().detach().numpy()[torch.nonzero(batch_x[1][p].cpu()).numpy().squeeze()]))
-                    if not (sample in seen_in_support):
-                        seen_in_support.add(sample)
-                    else:
-                        print("Sample already seen in support", k)
 
                 # BATCH_x = [text, mask]
                 x = model.forward(batch_x, classifier_idx=0)  # B x n_classes
@@ -123,24 +111,11 @@ def eval(args):
             all_preds = []
             all_labels = []
 
-            seen_in_query = set()
-
             with torch.no_grad():
                 for l, data in enumerate(task.query_loader):
                     batch_x, labels = data
                     batch_x = [b.to(device) for b in batch_x]
                     labels = labels.to(device)
-
-                    for p, sample in enumerate(batch_x[0]):
-                        sample = tuple(list(sample.cpu().detach().numpy()[torch.nonzero(batch_x[1][p].cpu()).numpy().squeeze()]))
-                        if not (sample in seen_in_query):
-                            seen_in_query.add(sample)
-                        else:
-                            print("Sample already seen in query", k)
-
-                        if sample in seen_in_support:
-                            print("AAAAAAAAAH sample seen in support :(", k)
-
 
                     x = model.forward(batch_x, classifier_idx=0)  # B x n_classes
 
@@ -169,14 +144,14 @@ def eval(args):
                 "f1_macro": mtr.f1_score(all_labels, all_preds, average='macro'),
                 "confusion": mtr.confusion_matrix(all_labels, all_preds)
             })
-            for_da_mean.append(dataset_results[-1])
+            results_per_task.append(dataset_results[-1])
         dataset_results.append({
-            "dataset_name": for_da_mean[0]["dataset_name"],
-            "dataset": for_da_mean[0]["dataset"],
+            "dataset_name": results_per_task[0]["dataset_name"],
+            "dataset": results_per_task[0]["dataset"],
             "task": "mean",
-            "acc": sum([x["acc"] for x in for_da_mean]) / len(for_da_mean),
-            "bal_acc": sum([x["bal_acc"] for x in for_da_mean]) / len(for_da_mean),
-            "f1_macro": sum([x["f1_macro"] for x in for_da_mean]) / len(for_da_mean),
+            "acc": sum([x["acc"] for x in results_per_task]) / len(results_per_task),
+            "bal_acc": sum([x["bal_acc"] for x in results_per_task]) / len(results_per_task),
+            "f1_macro": sum([x["f1_macro"] for x in results_per_task]) / len(results_per_task),
             "confusion": "nope"
         })
     res = pd.DataFrame(dataset_results)
