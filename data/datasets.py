@@ -176,6 +176,11 @@ class QuianData(Dataset):
             if os.stat(new_file_name).st_size == 0:  # TODO; new_file_name does not exist
                 wr.writerow(new_header)
             wr.writerows(data)
+
+class RedditQuian(QuianData):
+    def __init__(self, csv_file_dir: str="./raw_datasets/redditQuian.csv"):
+        super(RedditQuian, self).__init__(csv_file_dir)
+
             
 class RezvanHarrassment(Dataset):
     def __init__(self, csv_file_dir: str="./raw_datasets/rezvanData.csv"):
@@ -354,6 +359,7 @@ ALL_DATASETS = {
     "foxnews": DataFoxNews,
     "stormfront": DeGilbertStormFront,
     "quian": QuianData,
+    "redditquian": RedditQuian,
     "rezvan": RezvanHarrassment,
     "founta": FountaDataset,
     "talkdown": TalkdownDataset,

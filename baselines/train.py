@@ -1,7 +1,7 @@
 import os
 import argparse
 import pytorch_lightning as pl
-from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 import torch
 from data.datasets import DataFoxNews, DataTwitterDavidson, ALL_DATASETS, BalancedSampler
 from data_utils import TakeTurnLoader
@@ -40,6 +40,7 @@ def train(args):
         assert dataset in ALL_DATASETS
         print("...", dataset)
         datasets.append(ALL_DATASETS[dataset]())
+        print("....", datasets[-1].task_name)
 
     #TODO random splitting might produce imbalanced classes in splits
     train_datasets = []
@@ -57,7 +58,6 @@ def train(args):
         test_datasets.append(test_dataset)
 
 
-    # TODO split in training, val test based. Maybe leave out a task? Keep in mind that datasets have different sizes
     train_dl = [create_dataloader(d,
                               batch_size=32,
                               shuffle=False,
@@ -69,7 +69,7 @@ def train(args):
                               shuffle=False,
                                  num_workers=4,
                               collate_fn=prepare_batch) for d in val_datasets]
-    test_dl = TakeTurnLoader(test_datasets)
+    # test_dl = TakeTurnLoader(test_datasets)
 
     print("Datasets")
     print("Training datasets: ", len(train_dl))
@@ -83,7 +83,8 @@ def train(args):
     # callbacks.append(LogCallback())
     if not args.progress_bar:
         callbacks.append(PrintCallback())
-
+    lr_monitor = LearningRateMonitor(logging_interval='step')
+    callbacks.append(lr_monitor)
     wandb_logger = WandbLogger(project='hate-baseline', entity='atcs-project', config=vars(args))
     # wandb.init(project='hate-baseline', entity='atcs-project', config=vars(args))
     trainer = pl.Trainer(default_root_dir=args.log_dir,
@@ -107,7 +108,6 @@ def train(args):
     # Create model
     dict_args = vars(args)
     model = KNNBaseline(**dict_args, clfs_spec=[d.n_classes for d in datasets])
-    model.encoder.unfreeze_attention_layer([6, 7, 8, 9, 10, 11])
 
     if not args.progress_bar:
         print("\nThe progress bar has been surpressed. For updates on the training progress, " + \
@@ -118,7 +118,7 @@ def train(args):
     with torch.autograd.set_detect_anomaly(True):
         # trainer.tune(model, train_dataloader=train_dl, val_dataloaders=val_dls)
     # TODO this might be problematic, not supplying a real dataloader, only something iterable.
-        trainer.fit(model, train_dataloader=train_dl, val_dataloaders=val_dls)
+        trainer.fit(model, train_dataloader=train_dl, val_dataloaders=train_dl + val_dls)
         print(modelcheckpoint.best_model_path)
     # trainer.test(test_dataloaders=test_loader)
 
@@ -135,9 +135,9 @@ if __name__ == '__main__':
                         help='Number of epochs to train.')
     parser.add_argument('--batch_size', default=32, type=int,
                         help='Batch size for training.')
-    parser.add_argument('--split_fractions', default="0.8,0.1,0.1", type=lambda x: [float(f) for f in x.split(',')],
-                        help='Split fractions e.g.: 0.8,0.1,0.1')
-    parser.add_argument('--datasets', default="twitter_davidson", type=lambda x: x.split(","),
+    parser.add_argument('--split_fractions', default="0.9,0.1,0", type=lambda x: [float(f) for f in x.split(',')],
+                        help='Split fractions e.g.: 0.9,0.1,0')
+    parser.add_argument('--datasets', default="redditquian", type=lambda x: x.split(","),
                         help='Names of datasets separated with commas.')
     parser.add_argument('--num_workers', default=0, type=int,
                         help='Number of workers for the tasks.')
